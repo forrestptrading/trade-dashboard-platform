@@ -3,9 +3,9 @@ import { HealthCheckResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-router.get("/healthz", (_req, res) => {
+router.get(["/health", "/healthz"], (_req, res) => {
   const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
+  res.json({ ...data, timestamp: new Date().toISOString(), service: "trading-dashboard-api" });
 });
 
 export default router;
