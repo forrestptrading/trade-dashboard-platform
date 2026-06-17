@@ -29,6 +29,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get("/", (_req, res) => {
+  res.send("Trade Dashboard API is running");
+});
+
+app.get("/quotes", (_req, res) => {
+  res.json({
+    SPY: 0,
+    QQQ: 0,
+    TSLA: 0,
+    NVDA: 0,
+  });
+});
+
 app.use("/api", router);
 
 export default app;
