@@ -6,6 +6,7 @@ import watchlistRouter from "./watchlist";
 import quotesRouter from "./quotes";
 import quotesRefreshRouter from "./quotesRefresh";
 import marketSummaryRouter from "./marketSummary";
+import accountActivityRouter from "./accountActivity";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(watchlistRouter);
 router.use(quotesRouter);
 router.use(quotesRefreshRouter);
 router.use(marketSummaryRouter);
+router.use(accountActivityRouter);
 
 export default router;
