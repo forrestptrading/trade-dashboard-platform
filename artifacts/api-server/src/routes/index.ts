@@ -4,6 +4,7 @@ import portfolioRouter from "./portfolio";
 import positionsRouter from "./positions";
 import watchlistRouter from "./watchlist";
 import quotesRouter from "./quotes";
+import quotesRefreshRouter from "./quotesRefresh";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(portfolioRouter);
 router.use(positionsRouter);
 router.use(watchlistRouter);
 router.use(quotesRouter);
+router.use(quotesRefreshRouter);
 
 export default router;
