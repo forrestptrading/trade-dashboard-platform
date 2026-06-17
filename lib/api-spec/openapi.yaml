@@ -1,22 +1,33 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Trading Dashboard API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: portfolio
+    description: Portfolio operations
+  - name: positions
+    description: Positions operations
+  - name: watchlist
+    description: Watchlist operations
+  - name: quotes
+    description: Quote operations
+  - name: market
+    description: Market summary operations
+  - name: activity
+    description: Account activity operations
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +35,144 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Health check with timestamp
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /portfolio:
+    get:
+      operationId: getPortfolio
+      tags: [portfolio]
+      summary: Get portfolio summary
+      responses:
+        "200":
+          description: Portfolio data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioResponse"
+
+  /positions:
+    get:
+      operationId: getPositions
+      tags: [positions]
+      summary: Get all open positions
+      responses:
+        "200":
+          description: List of positions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionsResponse"
+
+  /watchlist:
+    get:
+      operationId: getWatchlist
+      tags: [watchlist]
+      summary: Get watchlist items
+      responses:
+        "200":
+          description: List of watchlist items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WatchlistResponse"
+
+  /quotes:
+    get:
+      operationId: getQuotes
+      tags: [quotes]
+      summary: Get quotes for one or more ticker symbols
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of symbols (e.g. AAPL,TSLA)
+      responses:
+        "200":
+          description: Quote data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesResponse"
+        "400":
+          description: Missing or invalid symbols param
+
+  /quotes/refresh:
+    post:
+      operationId: refreshQuotes
+      tags: [quotes]
+      summary: Refresh prices with simulated movement
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteRefreshInput"
+      responses:
+        "200":
+          description: Refreshed quotes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesResponse"
+
+  /market/summary:
+    get:
+      operationId: getMarketSummary
+      tags: [market]
+      summary: Get overall market status, indices, sectors, and movers
+      responses:
+        "200":
+          description: Market summary data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketSummaryResponse"
+
+  /account/activity:
+    get:
+      operationId: getAccountActivity
+      tags: [activity]
+      summary: Get transaction history
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [buy, sell, dividend, deposit, withdrawal]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [completed, pending, cancelled]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Activity list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +180,413 @@ components:
       properties:
         status:
           type: string
+        timestamp:
+          type: ["string", "null"]
+        service:
+          type: ["string", "null"]
       required:
         - status
 
+    Portfolio:
+      type: object
+      properties:
+        account_number:
+          type: string
+        total_value:
+          type: number
+        cash:
+          type: number
+        invested_value:
+          type: number
+        day_change:
+          type: number
+        day_change_percent:
+          type: number
+        total_return:
+          type: number
+        total_return_percent:
+          type: number
+        buying_power:
+          type: number
+        currency:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - account_number
+        - total_value
+        - cash
+        - invested_value
+        - day_change
+        - day_change_percent
+        - total_return
+        - total_return_percent
+        - buying_power
+        - currency
+        - updated_at
+
+    PortfolioResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/Portfolio"
+      required:
+        - success
+        - data
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        quantity:
+          type: number
+        average_buy_price:
+          type: number
+        current_price:
+          type: number
+        market_value:
+          type: number
+        day_change:
+          type: number
+        day_change_percent:
+          type: number
+        total_return:
+          type: number
+        total_return_percent:
+          type: number
+        equity:
+          type: number
+        percent_of_portfolio:
+          type: number
+      required:
+        - id
+        - symbol
+        - name
+        - quantity
+        - average_buy_price
+        - current_price
+        - market_value
+        - day_change
+        - day_change_percent
+        - total_return
+        - total_return_percent
+        - equity
+        - percent_of_portfolio
+
+    PositionsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Position"
+      required:
+        - success
+        - count
+        - data
+
+    WatchlistItem:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        current_price:
+          type: number
+        day_change:
+          type: number
+        day_change_percent:
+          type: number
+        week_52_high:
+          type: number
+        week_52_low:
+          type: number
+        market_cap:
+          type: string
+        volume:
+          type: number
+        pe_ratio:
+          type: ["number", "null"]
+        added_at:
+          type: string
+      required:
+        - id
+        - symbol
+        - name
+        - current_price
+        - day_change
+        - day_change_percent
+        - week_52_high
+        - week_52_low
+        - market_cap
+        - volume
+        - pe_ratio
+        - added_at
+
+    WatchlistResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/WatchlistItem"
+      required:
+        - success
+        - count
+        - data
+
+    Quote:
+      type: object
+      properties:
+        symbol:
+          type: string
+        price:
+          type: number
+        change:
+          type: number
+        changePercent:
+          type: number
+        previousClose:
+          type: number
+        timestamp:
+          type: string
+        source:
+          type: string
+      required:
+        - symbol
+        - price
+        - change
+        - changePercent
+        - previousClose
+        - timestamp
+        - source
+
+    QuotesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Quote"
+        not_found:
+          type: array
+          items:
+            type: string
+      required:
+        - success
+        - count
+        - data
+
+    QuoteRefreshInput:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+
+    MarketIndex:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        price:
+          type: number
+        change:
+          type: number
+        changePercent:
+          type: number
+        ytdChangePercent:
+          type: ["number", "null"]
+      required:
+        - symbol
+        - name
+        - price
+        - change
+        - changePercent
+        - ytdChangePercent
+
+    Sector:
+      type: object
+      properties:
+        name:
+          type: string
+        etf:
+          type: string
+        changePercent:
+          type: number
+        trend:
+          type: string
+      required:
+        - name
+        - etf
+        - changePercent
+        - trend
+
+    Mover:
+      type: object
+      properties:
+        symbol:
+          type: string
+        changePercent:
+          type: number
+      required:
+        - symbol
+        - changePercent
+
+    MarketStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+        nextEvent:
+          type: string
+      required:
+        - status
+        - message
+        - nextEvent
+
+    MarketSummaryData:
+      type: object
+      properties:
+        market:
+          $ref: "#/components/schemas/MarketStatus"
+        indices:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketIndex"
+        sectors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sector"
+        movers:
+          type: object
+          properties:
+            gainers:
+              type: array
+              items:
+                $ref: "#/components/schemas/Mover"
+            losers:
+              type: array
+              items:
+                $ref: "#/components/schemas/Mover"
+          required:
+            - gainers
+            - losers
+        timestamp:
+          type: string
+      required:
+        - market
+        - indices
+        - sectors
+        - movers
+        - timestamp
+
+    MarketSummaryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/MarketSummaryData"
+      required:
+        - success
+        - data
+
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [buy, sell, dividend, deposit, withdrawal]
+        symbol:
+          type: ["string", "null"]
+        name:
+          type: ["string", "null"]
+        quantity:
+          type: ["number", "null"]
+        price:
+          type: ["number", "null"]
+        amount:
+          type: number
+        status:
+          type: string
+          enum: [completed, pending, cancelled]
+        date:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - type
+        - amount
+        - status
+        - date
+        - description
+
+    ActivitySummary:
+      type: object
+      properties:
+        total_invested:
+          type: string
+        total_proceeds:
+          type: string
+        total_dividends:
+          type: string
+        total_deposits:
+          type: string
+        pending_count:
+          type: integer
+      required:
+        - total_invested
+        - total_proceeds
+        - total_dividends
+        - total_deposits
+        - pending_count
+
+    ActivityResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        summary:
+          $ref: "#/components/schemas/ActivitySummary"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+      required:
+        - success
+        - count
+        - summary
+        - data

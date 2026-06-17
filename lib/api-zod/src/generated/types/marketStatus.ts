@@ -6,10 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
+export interface MarketStatus {
   status: string;
-  /** @nullable */
-  timestamp?: string | null;
-  /** @nullable */
-  service?: string | null;
+  message: string;
+  nextEvent: string;
 }
