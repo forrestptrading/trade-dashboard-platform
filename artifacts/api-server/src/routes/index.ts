@@ -7,6 +7,11 @@ import quotesRouter from "./quotes";
 import quotesRefreshRouter from "./quotesRefresh";
 import marketSummaryRouter from "./marketSummary";
 import accountActivityRouter from "./accountActivity";
+import portfolioSummaryRouter from "./portfolioSummary";
+import optionsPositionsRouter from "./optionsPositions";
+import activityRouter from "./activity";
+import approvalsPendingRouter from "./approvalsPending";
+import alertsRouter from "./alerts";
 
 const router: IRouter = Router();
 
@@ -18,5 +23,10 @@ router.use(quotesRouter);
 router.use(quotesRefreshRouter);
 router.use(marketSummaryRouter);
 router.use(accountActivityRouter);
+router.use(portfolioSummaryRouter);
+router.use(optionsPositionsRouter);
+router.use(activityRouter);
+router.use(approvalsPendingRouter);
+router.use(alertsRouter);
 
 export default router;
