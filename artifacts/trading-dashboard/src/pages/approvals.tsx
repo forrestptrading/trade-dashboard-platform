@@ -223,9 +223,15 @@ const MOCK_APPROVALS: Approval[] = [
 
 export default function Approvals() {
   const { data: historyRes, isLoading: isHistoryLoading, isError: isHistoryError } =
-    useGetApprovalsHistory();
+    useGetApprovalsHistory(
+      {},
+      { query: { refetchInterval: 30_000, refetchIntervalInBackground: false } },
+    );
   const { data: pendingRes, isLoading: isPendingLoading, isError: isPendingError } =
-    useGetApprovalsPending();
+    useGetApprovalsPending(
+      {},
+      { query: { refetchInterval: 30_000, refetchIntervalInBackground: false } },
+    );
 
   const history = isHistoryError ? MOCK_APPROVALS : (historyRes?.data ?? []);
   const counts = isHistoryError
