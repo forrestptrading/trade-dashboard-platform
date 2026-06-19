@@ -5,6 +5,21 @@
  * Trading Dashboard API
  * OpenAPI spec version: 0.1.0
  */
+export interface CreateApprovalInput {
+  symbol: string;
+  /** e.g. buy, sell, buy_to_open, sell_to_close */
+  action: string;
+  /** e.g. stock, option, crypto */
+  assetType?: string;
+  quantity: number;
+  strike?: number;
+  expiration?: string;
+  estimatedCost: number;
+  note?: string;
+  /** e.g. algo-signal, manual, webhook */
+  source?: string;
+}
+
 export type ApprovalStatus = typeof ApprovalStatus[keyof typeof ApprovalStatus];
 
 
@@ -31,6 +46,12 @@ export interface Approval {
   resolved_at?: string | null;
   /** @nullable */
   resolved_note?: string | null;
+}
+
+export interface CreateApprovalResponse {
+  success: boolean;
+  message: string;
+  data: Approval;
 }
 
 export interface ApprovalCounts {

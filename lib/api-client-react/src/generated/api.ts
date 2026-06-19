@@ -25,6 +25,8 @@ import type {
   ApprovalActionResponse,
   ApprovalsHistoryResponse,
   ApprovalsPendingResponse,
+  CreateApprovalInput,
+  CreateApprovalResponse,
   GetAccountActivityParams,
   GetQuotesParams,
   HealthStatus,
@@ -664,6 +666,77 @@ export function useGetMarketSummary<TData = Awaited<ReturnType<typeof getMarketS
 
 
 
+
+export const getCreateApprovalUrl = () => {
+
+
+
+
+  return `/api/approvals`
+}
+
+/**
+ * @summary Create a new pending approval request (mock/in-memory, no real trade)
+ */
+export const createApproval = async (createApprovalInput: CreateApprovalInput, options?: RequestInit): Promise<CreateApprovalResponse> => {
+
+  return customFetch<CreateApprovalResponse>(getCreateApprovalUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createApprovalInput,)
+  }
+);}
+
+
+
+
+export const getCreateApprovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApproval>>, TError,{data: BodyType<CreateApprovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createApproval>>, TError,{data: BodyType<CreateApprovalInput>}, TContext> => {
+
+const mutationKey = ['createApproval'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createApproval>>, {data: BodyType<CreateApprovalInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createApproval(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateApprovalMutationResult = NonNullable<Awaited<ReturnType<typeof createApproval>>>
+    export type CreateApprovalMutationBody = BodyType<CreateApprovalInput>
+    export type CreateApprovalMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a new pending approval request (mock/in-memory, no real trade)
+ */
+export const useCreateApproval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApproval>>, TError,{data: BodyType<CreateApprovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createApproval>>,
+        TError,
+        {data: BodyType<CreateApprovalInput>},
+        TContext
+      > => {
+      return useMutation(getCreateApprovalMutationOptions(options));
+    }
 
 export const getGetApprovalsHistoryUrl = () => {
 

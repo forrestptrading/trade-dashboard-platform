@@ -142,6 +142,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketSummaryResponse"
 
+  /approvals:
+    post:
+      operationId: createApproval
+      tags: [approvals]
+      summary: Create a new pending approval request (mock/in-memory, no real trade)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApprovalInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateApprovalResponse"
+        "400":
+          description: Missing required fields
+
   /approvals/history:
     get:
       operationId: getApprovalsHistory
@@ -259,6 +280,43 @@ paths:
 
 components:
   schemas:
+    CreateApprovalInput:
+      type: object
+      required: [symbol, action, quantity, estimatedCost]
+      properties:
+        symbol:
+          type: string
+        action:
+          type: string
+          description: "e.g. buy, sell, buy_to_open, sell_to_close"
+        assetType:
+          type: string
+          description: "e.g. stock, option, crypto"
+        quantity:
+          type: number
+        strike:
+          type: number
+        expiration:
+          type: string
+        estimatedCost:
+          type: number
+        note:
+          type: string
+        source:
+          type: string
+          description: "e.g. algo-signal, manual, webhook"
+
+    CreateApprovalResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/Approval"
+      required: [success, message, data]
+
     Approval:
       type: object
       properties:

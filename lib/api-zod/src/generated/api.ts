@@ -183,6 +183,22 @@ export const GetMarketSummaryResponse = zod.object({
 
 
 /**
+ * @summary Create a new pending approval request (mock/in-memory, no real trade)
+ */
+export const CreateApprovalBody = zod.object({
+  "symbol": zod.string(),
+  "action": zod.string().describe('e.g. buy, sell, buy_to_open, sell_to_close'),
+  "assetType": zod.string().optional().describe('e.g. stock, option, crypto'),
+  "quantity": zod.number(),
+  "strike": zod.number().optional(),
+  "expiration": zod.string().optional(),
+  "estimatedCost": zod.number(),
+  "note": zod.string().optional(),
+  "source": zod.string().optional().describe('e.g. algo-signal, manual, webhook')
+})
+
+
+/**
  * @summary Get all approvals with status and resolution details
  */
 export const GetApprovalsHistoryResponse = zod.object({

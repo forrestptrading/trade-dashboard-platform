@@ -18,6 +18,8 @@ export * from './approvalCounts';
 export * from './approvalsHistoryResponse';
 export * from './approvalsPendingResponse';
 export * from './approvalStatus';
+export * from './createApprovalInput';
+export * from './createApprovalResponse';
 export * from './getAccountActivityParams';
 export * from './getAccountActivityStatus';
 export * from './getAccountActivityType';

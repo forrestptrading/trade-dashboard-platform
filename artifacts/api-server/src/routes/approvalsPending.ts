@@ -19,6 +19,19 @@ interface Approval {
   requested_by: string;
   resolved_at?: string;
   resolved_note?: string;
+  // Extended fields for programmatic submissions
+  action?: string;
+  asset_type?: string;
+  strike?: number;
+  expiration?: string;
+  note?: string;
+  source?: string;
+}
+
+let idCounter = 1000;
+function nextId(): string {
+  idCounter += 1;
+  return `appr-${idCounter}`;
 }
 
 // In-memory store — shared across GET and POST handlers in this process
@@ -66,6 +79,61 @@ const approvals: Approval[] = [
     requested_by: "manual",
   },
 ];
+
+// POST /api/approvals — create a new pending approval (mock only, no real trade)
+router.post("/approvals", (req, res) => {
+  const body = (req.body ?? {}) as {
+    symbol?: string;
+    action?: string;
+    assetType?: string;
+    quantity?: number;
+    strike?: number;
+    expiration?: string;
+    estimatedCost?: number;
+    note?: string;
+    source?: string;
+  };
+
+  if (!body.symbol || !body.action || body.quantity == null || body.estimatedCost == null) {
+    res.status(400).json({
+      success: false,
+      error: "Required fields: symbol, action, quantity, estimatedCost",
+    });
+    return;
+  }
+
+  const now = new Date();
+  const expires = new Date(now.getTime() + 8 * 60 * 60 * 1000); // +8 hours
+
+  const approval: Approval = {
+    id: nextId(),
+    type: body.action.toLowerCase(),
+    symbol: body.symbol.toUpperCase(),
+    name: body.symbol.toUpperCase(),
+    quantity: body.quantity,
+    estimated_price: body.quantity > 0 ? body.estimatedCost / body.quantity : 0,
+    estimated_total: body.estimatedCost,
+    submitted_at: now.toISOString(),
+    expires_at: expires.toISOString(),
+    status: "pending_approval",
+    reason: body.note ?? "Programmatic submission",
+    requested_by: body.source ?? "api",
+    action: body.action,
+    asset_type: body.assetType ?? "stock",
+    strike: body.strike,
+    expiration: body.expiration,
+    note: body.note,
+    source: body.source,
+  };
+
+  approvals.push(approval);
+
+  res.status(201).json({
+    success: true,
+    message: "Approval request created. Mock only — no real trade placed.",
+    data: approval,
+  });
+});
 
 // GET /api/approvals/history — returns all approvals regardless of status
 router.get("/approvals/history", (_req, res) => {
