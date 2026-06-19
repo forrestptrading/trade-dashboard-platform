@@ -1,12 +1,8 @@
 /**
- * RobinhoodClient — placeholder broker integration layer.
+ * RobinhoodClient — broker integration layer.
  *
- * All methods are STUBS. They throw a clear "not implemented" error.
- * No network calls are made. No credentials are read.
- *
- * This file defines the interface contract that the live implementation
- * will satisfy. When Phase 2 begins (live read-only data), replace each
- * stub body with the real fetch() call to api.robinhood.com.
+ * Phase 2A: getQuotes() is live — calls api.robinhood.com/quotes/.
+ * All other methods remain stubs — they throw NOT_IMPLEMENTED.
  *
  * IMPORTANT:
  *  - Do NOT add order placement methods here.
@@ -14,6 +10,7 @@
  *  - Read-only data only.
  */
 
+import { BROKER_CONFIG, buildRequestHeaders } from "./config.js";
 import type {
   BrokerSource,
   RobinhoodAccount,
@@ -93,11 +90,54 @@ class RobinhoodClient {
 
   /**
    * GET https://api.robinhood.com/quotes/?symbols=AAPL,TSLA,NVDA
-   * Returns real-time quotes for up to ~75 symbols per request.
-   * Key fields: last_trade_price, previous_close, bid_price, ask_price.
+   *
+   * Phase 2A: LIVE implementation.
+   * The endpoint is publicly accessible without auth, but a bearer token
+   * (ROBINHOOD_ACCESS_TOKEN) is used when available for better rate limits.
+   * Throws on network failure or non-200 response so callers can fall back
+   * to mock data.
+   *
+   * Never log or return the Authorization header value.
    */
   async getQuotes(symbols: string[]): Promise<RobinhoodQuote[]> {
-    throw NOT_IMPLEMENTED(`getQuotes(${symbols.join(",")})`);
+    if (symbols.length === 0) return [];
+
+    // Robinhood accepts up to ~75 symbols per request; chunk if needed
+    const chunks: string[][] = [];
+    for (let i = 0; i < symbols.length; i += 70) {
+      chunks.push(symbols.slice(i, i + 70));
+    }
+
+    const results: RobinhoodQuote[] = [];
+
+    for (const chunk of chunks) {
+      const url = new URL(`${BROKER_CONFIG.baseUrl}/quotes/`);
+      url.searchParams.set("symbols", chunk.join(","));
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: buildRequestHeaders(),
+        signal: AbortSignal.timeout(8_000), // 8s timeout per chunk
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `[RobinhoodClient] getQuotes HTTP ${response.status} for symbols: ${chunk.join(",")}`,
+        );
+      }
+
+      const body = (await response.json()) as { results: RobinhoodQuote[] };
+
+      if (!Array.isArray(body.results)) {
+        throw new Error(
+          "[RobinhoodClient] getQuotes: unexpected response shape — missing results[]",
+        );
+      }
+
+      results.push(...body.results);
+    }
+
+    return results;
   }
 
   // ── Watchlist ──────────────────────────────────────────────────────────────
