@@ -4,6 +4,7 @@ import {
   useGetApprovalsPending,
   useApproveApproval,
   useRejectApproval,
+  useCreateApproval,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
-import { CheckCircle, XCircle, Clock } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronUp, XCircle, Clock, Plus } from "lucide-react";
 
 type Approval = {
   id: string;
@@ -221,6 +225,230 @@ const MOCK_APPROVALS: Approval[] = [
   },
 ];
 
+const BLANK_FORM = {
+  symbol: "",
+  action: "BUY",
+  assetType: "SHARES",
+  quantity: "",
+  strike: "",
+  expiration: "",
+  estimatedCost: "",
+  note: "",
+};
+
+function SubmitTradeForm() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(BLANK_FORM);
+
+  const createMutation = useCreateApproval({
+    mutation: {
+      onSuccess: (res) => {
+        queryClient.invalidateQueries({ queryKey: ["/approvals/pending"] });
+        queryClient.invalidateQueries({ queryKey: ["/approvals/history"] });
+        toast({
+          title: "Request submitted",
+          description: `${res.data.symbol} ${res.data.type.toUpperCase()} queued for approval — mock only.`,
+        });
+        setForm(BLANK_FORM);
+        setOpen(false);
+      },
+      onError: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : "Submission failed";
+        toast({ title: "Error", description: msg, variant: "destructive" });
+      },
+    },
+  });
+
+  const set = (key: keyof typeof BLANK_FORM) => (val: string) =>
+    setForm((f) => ({ ...f, [key]: val }));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const qty = Number(form.quantity);
+    const cost = Number(form.estimatedCost);
+    if (!form.symbol || !qty || !cost) return;
+    createMutation.mutate({
+      data: {
+        symbol: form.symbol.toUpperCase(),
+        action: form.action.toLowerCase(),
+        assetType: form.assetType,
+        quantity: qty,
+        estimatedCost: cost,
+        strike: form.strike ? Number(form.strike) : undefined,
+        expiration: form.expiration || undefined,
+        note: form.note || undefined,
+        source: "manual_dashboard",
+      },
+    });
+  };
+
+  const needsOptionsFields = form.assetType === "CALL" || form.assetType === "PUT";
+
+  return (
+    <Card className="bg-card border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Plus className="h-4 w-4 text-primary" />
+          <span className="font-mono text-sm font-medium">Submit Trade Request</span>
+        </div>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div className="mx-5 mb-3 px-3 py-2 rounded-md bg-yellow-500/10 border border-yellow-500/25 flex items-center gap-2">
+            <span className="text-yellow-400 font-mono text-xs">⚠ Mock trade request — not sent to broker</span>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <CardContent className="pt-0 pb-5 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Symbol *</Label>
+                  <Input
+                    placeholder="e.g. AAPL"
+                    value={form.symbol}
+                    onChange={(e) => set("symbol")(e.target.value.toUpperCase())}
+                    className="font-mono uppercase bg-background border-border h-8 text-sm"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Action *</Label>
+                  <Select value={form.action} onValueChange={set("action")}>
+                    <SelectTrigger className="bg-background border-border h-8 text-sm font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="BUY">BUY</SelectItem>
+                      <SelectItem value="SELL">SELL</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Asset Type *</Label>
+                  <Select value={form.assetType} onValueChange={set("assetType")}>
+                    <SelectTrigger className="bg-background border-border h-8 text-sm font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SHARES">SHARES</SelectItem>
+                      <SelectItem value="CALL">CALL</SelectItem>
+                      <SelectItem value="PUT">PUT</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Quantity *</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="10"
+                    value={form.quantity}
+                    onChange={(e) => set("quantity")(e.target.value)}
+                    className="font-mono bg-background border-border h-8 text-sm"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Estimated Cost *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="1500.00"
+                    value={form.estimatedCost}
+                    onChange={(e) => set("estimatedCost")(e.target.value)}
+                    className="font-mono bg-background border-border h-8 text-sm"
+                    required
+                  />
+                </div>
+
+                {needsOptionsFields && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono text-xs uppercase text-muted-foreground">Strike</Label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        placeholder="200.00"
+                        value={form.strike}
+                        onChange={(e) => set("strike")(e.target.value)}
+                        className="font-mono bg-background border-border h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono text-xs uppercase text-muted-foreground">Expiration</Label>
+                      <Input
+                        type="date"
+                        value={form.expiration}
+                        onChange={(e) => set("expiration")(e.target.value)}
+                        className="font-mono bg-background border-border h-8 text-sm"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className={`space-y-1.5 ${needsOptionsFields ? "" : "md:col-span-3"}`}>
+                  <Label className="font-mono text-xs uppercase text-muted-foreground">Note</Label>
+                  <Input
+                    placeholder="Reason or signal description"
+                    value={form.note}
+                    onChange={(e) => set("note")(e.target.value)}
+                    className="font-mono bg-background border-border h-8 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="font-mono text-xs text-muted-foreground">
+                  source: <span className="text-foreground">manual_dashboard</span>
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="font-mono text-xs h-7"
+                    onClick={() => { setForm(BLANK_FORM); setOpen(false); }}
+                    disabled={createMutation.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30 font-mono text-xs h-7 px-4"
+                    disabled={createMutation.isPending}
+                  >
+                    {createMutation.isPending ? "Submitting…" : "Submit Request"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </form>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function Approvals() {
   const { data: historyRes, isLoading: isHistoryLoading, isError: isHistoryError } =
     useGetApprovalsHistory(
@@ -249,6 +477,8 @@ export default function Approvals() {
           TRADE APPROVAL QUEUE & HISTORY
         </p>
       </div>
+
+      <SubmitTradeForm />
 
       <div className="grid grid-cols-3 gap-4">
         <Card className="bg-card border-border">
