@@ -1,13 +1,8 @@
 import { Router, type IRouter } from "express";
+import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
-
-// TODO: Robinhood integration
-// Orders:    GET https://api.robinhood.com/orders/
-// Dividends: GET https://api.robinhood.com/dividends/
-// Transfers: GET https://api.robinhood.com/ach/transfers/
-// Requires: Authorization: Bearer <access_token>
-// Key fields: side (buy/sell), average_price, quantity, state, updated_at, instrument
 
 type ActivityType = "buy" | "sell" | "dividend" | "deposit" | "withdrawal";
 type ActivityStatus = "completed" | "pending" | "cancelled";
@@ -23,10 +18,10 @@ interface ActivityItem {
   status: ActivityStatus;
   date: string;
   description: string;
-  _robinhood_note: string;
+  source: "mock" | "robinhood";
 }
 
-const ACTIVITY: ActivityItem[] = [
+const MOCK_ACTIVITY: ActivityItem[] = [
   {
     id: "act-001",
     type: "buy",
@@ -38,7 +33,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-16T14:32:11.000Z",
     description: "Bought 4 shares of NVDA at $832.14",
-    _robinhood_note: "Future: orders/ side=buy, state=filled",
+    source: "mock",
   },
   {
     id: "act-002",
@@ -51,7 +46,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-15T11:08:45.000Z",
     description: "Sold 5 shares of TSLA at $255.42",
-    _robinhood_note: "Future: orders/ side=sell, state=filled",
+    source: "mock",
   },
   {
     id: "act-003",
@@ -62,7 +57,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-13T09:00:00.000Z",
     description: "Dividend payment from AAPL — $0.25/share × 57 shares",
-    _robinhood_note: "Future: dividends/ state=paid",
+    source: "mock",
   },
   {
     id: "act-004",
@@ -75,7 +70,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-12T13:21:09.000Z",
     description: "Bought 3 shares of META at $471.88",
-    _robinhood_note: "Future: orders/ side=buy, state=filled",
+    source: "mock",
   },
   {
     id: "act-005",
@@ -84,7 +79,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-10T08:00:00.000Z",
     description: "ACH deposit from Bank of America ****1234",
-    _robinhood_note: "Future: ach/transfers/ direction=deposit, state=completed",
+    source: "mock",
   },
   {
     id: "act-006",
@@ -97,7 +92,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-09T10:44:55.000Z",
     description: "Bought 10 shares of AMZN at $178.33",
-    _robinhood_note: "Future: orders/ side=buy, state=filled",
+    source: "mock",
   },
   {
     id: "act-007",
@@ -110,7 +105,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-06T15:58:22.000Z",
     description: "Sold 20 shares of PLTR at $26.14",
-    _robinhood_note: "Future: orders/ side=sell, state=filled",
+    source: "mock",
   },
   {
     id: "act-008",
@@ -121,7 +116,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "completed",
     date: "2026-06-05T09:00:00.000Z",
     description: "Dividend payment from MSFT — $0.75/share × 20 shares",
-    _robinhood_note: "Future: dividends/ state=paid",
+    source: "mock",
   },
   {
     id: "act-009",
@@ -134,7 +129,7 @@ const ACTIVITY: ActivityItem[] = [
     status: "pending",
     date: "2026-06-17T09:15:00.000Z",
     description: "Buying 5 shares of MSFT at market price",
-    _robinhood_note: "Future: orders/ state=queued or confirmed",
+    source: "mock",
   },
   {
     id: "act-010",
@@ -143,11 +138,11 @@ const ACTIVITY: ActivityItem[] = [
     status: "pending",
     date: "2026-06-17T07:30:00.000Z",
     description: "ACH withdrawal to Bank of America ****1234",
-    _robinhood_note: "Future: ach/transfers/ direction=withdraw, state=pending",
+    source: "mock",
   },
 ];
 
-router.get("/account/activity", (req, res) => {
+router.get("/account/activity", async (req, res) => {
   const typeFilter = req.query["type"] as string | undefined;
   const statusFilter = req.query["status"] as string | undefined;
   const limitParam = req.query["limit"];
@@ -157,30 +152,42 @@ router.get("/account/activity", (req, res) => {
   const validStatuses: ActivityStatus[] = ["completed", "pending", "cancelled"];
 
   if (typeFilter && !validTypes.includes(typeFilter as ActivityType)) {
-    res.status(400).json({
-      success: false,
-      error: `Invalid type filter. Must be one of: ${validTypes.join(", ")}`,
-    });
+    res.status(400).json({ success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` });
     return;
   }
-
   if (statusFilter && !validStatuses.includes(statusFilter as ActivityStatus)) {
-    res.status(400).json({
-      success: false,
-      error: `Invalid status filter. Must be one of: ${validStatuses.join(", ")}`,
-    });
+    res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` });
     return;
   }
-
   if (limit !== undefined && (isNaN(limit) || limit < 1)) {
-    res.status(400).json({
-      success: false,
-      error: "limit must be a positive integer",
-    });
+    res.status(400).json({ success: false, error: "limit must be a positive integer" });
     return;
   }
 
-  let results = [...ACTIVITY].sort(
+  let baseActivity = MOCK_ACTIVITY;
+  let dataSource: "mock" | "robinhood" = "mock";
+
+  if (useLiveData()) {
+    try {
+      // Live: merge GET /orders/ (buys/sells) + GET /dividends/
+      // Each order.instrument URL must be resolved to symbol + name.
+      // Map order.state → ActivityStatus, order.side → ActivityType
+      const [orders, dividends] = await Promise.all([
+        robinhoodClient.getOrders(),
+        robinhoodClient.getDividends(),
+      ]);
+
+      // Stub: transformation goes here when implemented.
+      // For now the stub throws, so this block is unreachable.
+      void orders;
+      void dividends;
+      dataSource = "robinhood";
+    } catch (err) {
+      logger.warn(`[broker] getOrders/getDividends failed, using mock: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  let results = [...baseActivity].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   );
 
@@ -188,29 +195,27 @@ router.get("/account/activity", (req, res) => {
   if (statusFilter) results = results.filter((a) => a.status === statusFilter);
   if (limit) results = results.slice(0, limit);
 
-  // Summary totals across unfiltered data
   const summary = {
-    total_invested: ACTIVITY.filter((a) => a.type === "buy" && a.status === "completed")
+    total_invested: baseActivity
+      .filter((a) => a.type === "buy" && a.status === "completed")
       .reduce((sum, a) => sum + Math.abs(a.amount), 0)
       .toFixed(2),
-    total_proceeds: ACTIVITY.filter((a) => a.type === "sell" && a.status === "completed")
+    total_proceeds: baseActivity
+      .filter((a) => a.type === "sell" && a.status === "completed")
       .reduce((sum, a) => sum + a.amount, 0)
       .toFixed(2),
-    total_dividends: ACTIVITY.filter((a) => a.type === "dividend" && a.status === "completed")
+    total_dividends: baseActivity
+      .filter((a) => a.type === "dividend" && a.status === "completed")
       .reduce((sum, a) => sum + a.amount, 0)
       .toFixed(2),
-    total_deposits: ACTIVITY.filter((a) => a.type === "deposit" && a.status === "completed")
+    total_deposits: baseActivity
+      .filter((a) => a.type === "deposit" && a.status === "completed")
       .reduce((sum, a) => sum + a.amount, 0)
       .toFixed(2),
-    pending_count: ACTIVITY.filter((a) => a.status === "pending").length,
+    pending_count: baseActivity.filter((a) => a.status === "pending").length,
   };
 
-  res.json({
-    success: true,
-    count: results.length,
-    summary,
-    data: results,
-  });
+  res.json({ success: true, source: dataSource, count: results.length, summary, data: results });
 });
 
 export default router;
