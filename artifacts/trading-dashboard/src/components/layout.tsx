@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, LayoutDashboard, LineChart, ListTree, LogOut } from "lucide-react";
+import { Activity, CheckSquare, LayoutDashboard, LineChart, ListTree, LogOut } from "lucide-react";
 import { useGetHealth, useGetQuotes } from "@workspace/api-client-react";
 
 function TickerTape() {
@@ -45,6 +45,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { href: "/positions", label: "Positions", icon: LineChart },
     { href: "/watchlist", label: "Watchlist", icon: ListTree },
     { href: "/activity", label: "Activity", icon: Activity },
+    { href: "/approvals", label: "Approvals", icon: CheckSquare },
   ];
 
   return (

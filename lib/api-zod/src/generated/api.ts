@@ -183,6 +183,127 @@ export const GetMarketSummaryResponse = zod.object({
 
 
 /**
+ * @summary Get all approvals with status and resolution details
+ */
+export const GetApprovalsHistoryResponse = zod.object({
+  "success": zod.boolean(),
+  "count": zod.number(),
+  "counts": zod.object({
+  "pending": zod.number(),
+  "approved": zod.number(),
+  "rejected": zod.number()
+}),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "symbol": zod.string(),
+  "name": zod.string(),
+  "quantity": zod.number(),
+  "estimated_price": zod.number(),
+  "estimated_total": zod.number(),
+  "submitted_at": zod.string(),
+  "expires_at": zod.string(),
+  "status": zod.enum(['pending_approval', 'approved', 'rejected']),
+  "reason": zod.string(),
+  "requested_by": zod.string(),
+  "resolved_at": zod.string().nullish(),
+  "resolved_note": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Get pending approvals only
+ */
+export const GetApprovalsPendingResponse = zod.object({
+  "success": zod.boolean(),
+  "count": zod.number(),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "symbol": zod.string(),
+  "name": zod.string(),
+  "quantity": zod.number(),
+  "estimated_price": zod.number(),
+  "estimated_total": zod.number(),
+  "submitted_at": zod.string(),
+  "expires_at": zod.string(),
+  "status": zod.enum(['pending_approval', 'approved', 'rejected']),
+  "reason": zod.string(),
+  "requested_by": zod.string(),
+  "resolved_at": zod.string().nullish(),
+  "resolved_note": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Approve a pending trade approval
+ */
+export const ApproveApprovalParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ApproveApprovalBody = zod.object({
+  "note": zod.string().optional()
+})
+
+export const ApproveApprovalResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string(),
+  "data": zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "symbol": zod.string(),
+  "name": zod.string(),
+  "quantity": zod.number(),
+  "estimated_price": zod.number(),
+  "estimated_total": zod.number(),
+  "submitted_at": zod.string(),
+  "expires_at": zod.string(),
+  "status": zod.enum(['pending_approval', 'approved', 'rejected']),
+  "reason": zod.string(),
+  "requested_by": zod.string(),
+  "resolved_at": zod.string().nullish(),
+  "resolved_note": zod.string().nullish()
+})
+})
+
+
+/**
+ * @summary Reject a pending trade approval
+ */
+export const RejectApprovalParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const RejectApprovalBody = zod.object({
+  "note": zod.string().optional()
+})
+
+export const RejectApprovalResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string(),
+  "data": zod.object({
+  "id": zod.string(),
+  "type": zod.string(),
+  "symbol": zod.string(),
+  "name": zod.string(),
+  "quantity": zod.number(),
+  "estimated_price": zod.number(),
+  "estimated_total": zod.number(),
+  "submitted_at": zod.string(),
+  "expires_at": zod.string(),
+  "status": zod.enum(['pending_approval', 'approved', 'rejected']),
+  "reason": zod.string(),
+  "requested_by": zod.string(),
+  "resolved_at": zod.string().nullish(),
+  "resolved_note": zod.string().nullish()
+})
+})
+
+
+/**
  * @summary Get transaction history
  */
 export const GetAccountActivityQueryParams = zod.object({

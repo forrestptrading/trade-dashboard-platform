@@ -142,6 +142,90 @@ paths:
               schema:
                 $ref: "#/components/schemas/MarketSummaryResponse"
 
+  /approvals/history:
+    get:
+      operationId: getApprovalsHistory
+      tags: [approvals]
+      summary: Get all approvals with status and resolution details
+      responses:
+        "200":
+          description: All approvals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalsHistoryResponse"
+
+  /approvals/pending:
+    get:
+      operationId: getApprovalsPending
+      tags: [approvals]
+      summary: Get pending approvals only
+      responses:
+        "200":
+          description: Pending approvals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalsPendingResponse"
+
+  /approvals/{id}/approve:
+    post:
+      operationId: approveApproval
+      tags: [approvals]
+      summary: Approve a pending trade approval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalActionInput"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalActionResponse"
+        "404":
+          description: Not found
+        "409":
+          description: Already resolved
+
+  /approvals/{id}/reject:
+    post:
+      operationId: rejectApproval
+      tags: [approvals]
+      summary: Reject a pending trade approval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalActionInput"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalActionResponse"
+        "404":
+          description: Not found
+        "409":
+          description: Already resolved
+
   /account/activity:
     get:
       operationId: getAccountActivity
@@ -175,6 +259,108 @@ paths:
 
 components:
   schemas:
+    Approval:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        quantity:
+          type: number
+        estimated_price:
+          type: number
+        estimated_total:
+          type: number
+        submitted_at:
+          type: string
+        expires_at:
+          type: string
+        status:
+          type: string
+          enum: [pending_approval, approved, rejected]
+        reason:
+          type: string
+        requested_by:
+          type: string
+        resolved_at:
+          type: ["string", "null"]
+        resolved_note:
+          type: ["string", "null"]
+      required:
+        - id
+        - type
+        - symbol
+        - name
+        - quantity
+        - estimated_price
+        - estimated_total
+        - submitted_at
+        - expires_at
+        - status
+        - reason
+        - requested_by
+
+    ApprovalCounts:
+      type: object
+      properties:
+        pending:
+          type: integer
+        approved:
+          type: integer
+        rejected:
+          type: integer
+      required: [pending, approved, rejected]
+
+    ApprovalsHistoryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        counts:
+          $ref: "#/components/schemas/ApprovalCounts"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Approval"
+      required: [success, count, counts, data]
+
+    ApprovalsPendingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Approval"
+      required: [success, count, data]
+
+    ApprovalActionInput:
+      type: object
+      properties:
+        note:
+          type: string
+
+    ApprovalActionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/Approval"
+      required: [success, message, data]
+
     HealthStatus:
       type: object
       properties:

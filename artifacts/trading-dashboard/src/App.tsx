@@ -9,6 +9,7 @@ import Dashboard from "./pages/dashboard";
 import Positions from "./pages/positions";
 import Watchlist from "./pages/watchlist";
 import Activity from "./pages/activity";
+import Approvals from "./pages/approvals";
 import Login from "./pages/login";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,9 @@ function Router() {
       </Route>
       <Route path="/activity">
         <Layout><Activity /></Layout>
+      </Route>
+      <Route path="/approvals">
+        <Layout><Approvals /></Layout>
       </Route>
       <Route component={NotFound} />
     </Switch>

@@ -5,6 +5,63 @@
  * Trading Dashboard API
  * OpenAPI spec version: 0.1.0
  */
+export type ApprovalStatus = typeof ApprovalStatus[keyof typeof ApprovalStatus];
+
+
+export const ApprovalStatus = {
+  pending_approval: 'pending_approval',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface Approval {
+  id: string;
+  type: string;
+  symbol: string;
+  name: string;
+  quantity: number;
+  estimated_price: number;
+  estimated_total: number;
+  submitted_at: string;
+  expires_at: string;
+  status: ApprovalStatus;
+  reason: string;
+  requested_by: string;
+  /** @nullable */
+  resolved_at?: string | null;
+  /** @nullable */
+  resolved_note?: string | null;
+}
+
+export interface ApprovalCounts {
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
+export interface ApprovalsHistoryResponse {
+  success: boolean;
+  count: number;
+  counts: ApprovalCounts;
+  data: Approval[];
+}
+
+export interface ApprovalsPendingResponse {
+  success: boolean;
+  count: number;
+  data: Approval[];
+}
+
+export interface ApprovalActionInput {
+  note?: string;
+}
+
+export interface ApprovalActionResponse {
+  success: boolean;
+  message: string;
+  data: Approval;
+}
+
 export interface HealthStatus {
   status: string;
   /** @nullable */
