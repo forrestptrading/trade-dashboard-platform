@@ -67,6 +67,23 @@ const approvals: Approval[] = [
   },
 ];
 
+// GET /api/approvals/history — returns all approvals regardless of status
+router.get("/approvals/history", (_req, res) => {
+  const counts = {
+    pending: approvals.filter((a) => a.status === "pending_approval").length,
+    approved: approvals.filter((a) => a.status === "approved").length,
+    rejected: approvals.filter((a) => a.status === "rejected").length,
+  };
+
+  const sorted = [...approvals].sort(
+    (a, b) =>
+      new Date(b.resolved_at ?? b.submitted_at).getTime() -
+      new Date(a.resolved_at ?? a.submitted_at).getTime(),
+  );
+
+  res.json({ success: true, count: approvals.length, counts, data: sorted });
+});
+
 // GET /api/approvals/pending — returns only pending items
 router.get("/approvals/pending", (_req, res) => {
   const pending = approvals.filter((a) => a.status === "pending_approval");
