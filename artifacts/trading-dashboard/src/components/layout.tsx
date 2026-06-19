@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { Activity, CheckSquare, LayoutDashboard, LineChart, ListTree, LogOut } from "lucide-react";
-import { useGetHealth, useGetQuotes } from "@workspace/api-client-react";
+import { useGetApprovalsPending, useGetHealth, useGetQuotes } from "@workspace/api-client-react";
 
 function TickerTape() {
   const { data: quotesRes } = useGetQuotes({ symbols: "SPY,QQQ,DIA,IWM,AAPL,MSFT,GOOGL,TSLA,NVDA,META" });
@@ -39,13 +39,15 @@ function TickerTape() {
 export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { data: health } = useGetHealth();
+  const { data: pendingRes } = useGetApprovalsPending();
+  const pendingCount = pendingRes?.count ?? 0;
 
   const navItems = [
-    { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-    { href: "/positions", label: "Positions", icon: LineChart },
-    { href: "/watchlist", label: "Watchlist", icon: ListTree },
-    { href: "/activity", label: "Activity", icon: Activity },
-    { href: "/approvals", label: "Approvals", icon: CheckSquare },
+    { href: "/dashboard", label: "Overview", icon: LayoutDashboard, badge: null },
+    { href: "/positions", label: "Positions", icon: LineChart, badge: null },
+    { href: "/watchlist", label: "Watchlist", icon: ListTree, badge: null },
+    { href: "/activity", label: "Activity", icon: Activity, badge: null },
+    { href: "/approvals", label: "Approvals", icon: CheckSquare, badge: pendingCount > 0 ? pendingCount : null },
   ];
 
   return (
@@ -60,8 +62,13 @@ export default function Layout({ children }: { children: ReactNode }) {
               const active = location === item.href;
               return (
                 <Link key={item.href} href={item.href} className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${active ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                  <item.icon className="h-4 w-4" />
-                  <span>{item.label}</span>
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">{item.label}</span>
+                  {item.badge !== null && (
+                    <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-mono text-[10px] font-semibold flex items-center justify-center tabular-nums">
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}
