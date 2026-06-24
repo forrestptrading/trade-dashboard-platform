@@ -1,0 +1,3 @@
+- [Trading Dashboard Project Status](trading-dashboard-status.md) — current phase, what's done, what's next
+- [Vite Proxy Fix](vite-proxy-fix.md) — frontend /api/* must proxy to port 8080 via vite.config.ts server.proxy
+- [Live Quotes Implementation](live-quotes.md) — getQuotes() is live via Robinhood public endpoint; other broker methods are stubs
