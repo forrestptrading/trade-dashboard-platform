@@ -117,4 +117,19 @@ router.get("/quotes", async (req, res) => {
   });
 });
 
+router.get("/portfolio", async (_req, res) => {
+  res.json({
+    success: true,
+    source: "demo-portfolio",
+    portfolio: {
+      totalValue: 52341.87,
+      buyingPower: 3241.56,
+      cash: 3241.56,
+      dailyChange: 412.34,
+      dailyPercent: 0.79,
+      positions: [],
+    },
+  });
+});
+
 export default router;
