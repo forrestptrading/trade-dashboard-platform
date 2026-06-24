@@ -6,14 +6,14 @@ const router: IRouter = Router();
 
 const MOCK_PORTFOLIO = {
   account_number: "MOCK-12345678",
-  total_value: 52341.87,
-  cash: 3241.56,
+  total_value: 999999.99,
+  cash: 77777.77,
   invested_value: 49100.31,
-  day_change: 412.34,
-  day_change_percent: 0.79,
+  day_change: 6666.66,
+  day_change_percent: 12.34,
   total_return: 7241.87,
   total_return_percent: 16.07,
-  buying_power: 3241.56,
+  buying_power: 88888.88,
   currency: "USD",
   updated_at: new Date().toISOString(),
 };
