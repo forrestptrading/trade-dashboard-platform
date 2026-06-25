@@ -13,6 +13,7 @@ import activityRouter from "./activity";
 import approvalsPendingRouter from "./approvalsPending";
 import alertsRouter from "./alerts";
 import aiOptionsAlertsRouter from "./aiOptionsAlerts";
+import aiCommandCenterRouter from "./aiCommandCenter";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(activityRouter);
 router.use(approvalsPendingRouter);
 router.use(alertsRouter);
 router.use(aiOptionsAlertsRouter);
+router.use(aiCommandCenterRouter);
 
 export default router;
