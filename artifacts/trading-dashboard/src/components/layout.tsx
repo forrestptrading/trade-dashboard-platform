@@ -39,10 +39,7 @@ function TickerTape() {
 export default function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { data: health } = useGetHealth();
-  const { data: pendingRes } = useGetApprovalsPending(
-    {},
-    { query: { refetchInterval: 30_000, refetchIntervalInBackground: false } },
-  );
+  const { data: pendingRes } = useGetApprovalsPending();
   const pendingCount = pendingRes?.count ?? 0;
 
   const navItems = [

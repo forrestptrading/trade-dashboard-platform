@@ -181,7 +181,7 @@ router.post("/approvals/:id/approve", (req, res) => {
 
   approval.status = "approved";
   approval.resolved_at = new Date().toISOString();
-  approval.resolved_note = body.note ?? null;
+  approval.resolved_note = body.note ?? undefined;
 
   res.json({
     success: true,
@@ -213,7 +213,7 @@ router.post("/approvals/:id/reject", (req, res) => {
 
   approval.status = "rejected";
   approval.resolved_at = new Date().toISOString();
-  approval.resolved_note = body.note ?? null;
+  approval.resolved_note = body.note ?? undefined;
 
   res.json({
     success: true,

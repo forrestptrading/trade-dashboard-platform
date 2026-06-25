@@ -451,15 +451,9 @@ function SubmitTradeForm() {
 
 export default function Approvals() {
   const { data: historyRes, isLoading: isHistoryLoading, isError: isHistoryError } =
-    useGetApprovalsHistory(
-      {},
-      { query: { refetchInterval: 30_000, refetchIntervalInBackground: false } },
-    );
+    useGetApprovalsHistory();
   const { data: pendingRes, isLoading: isPendingLoading, isError: isPendingError } =
-    useGetApprovalsPending(
-      {},
-      { query: { refetchInterval: 30_000, refetchIntervalInBackground: false } },
-    );
+    useGetApprovalsPending();
 
   const history = isHistoryError ? MOCK_APPROVALS : (historyRes?.data ?? []);
   const counts = isHistoryError
