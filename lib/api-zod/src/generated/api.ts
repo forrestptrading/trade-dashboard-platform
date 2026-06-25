@@ -44,7 +44,13 @@ export const GetPortfolioResponse = zod.object({
   "total_return_percent": zod.number(),
   "buying_power": zod.number(),
   "currency": zod.string(),
-  "updated_at": zod.string()
+  "updated_at": zod.string(),
+  "holdings": zod.array(zod.object({
+  "symbol": zod.string(),
+  "quantity": zod.number(),
+  "market_value": zod.number(),
+  "account_name": zod.string()
+}))
 })
 })
 

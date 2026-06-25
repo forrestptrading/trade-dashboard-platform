@@ -431,6 +431,23 @@ components:
       required:
         - status
 
+    Holding:
+      type: object
+      properties:
+        symbol:
+          type: string
+        quantity:
+          type: number
+        market_value:
+          type: number
+        account_name:
+          type: string
+      required:
+        - symbol
+        - quantity
+        - market_value
+        - account_name
+
     Portfolio:
       type: object
       properties:
@@ -456,6 +473,10 @@ components:
           type: string
         updated_at:
           type: string
+        holdings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Holding"
       required:
         - account_number
         - total_value
@@ -468,6 +489,7 @@ components:
         - buying_power
         - currency
         - updated_at
+        - holdings
 
     PortfolioResponse:
       type: object

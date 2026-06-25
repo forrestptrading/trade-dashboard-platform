@@ -91,6 +91,13 @@ export interface HealthStatus {
   service?: string | null;
 }
 
+export interface Holding {
+  symbol: string;
+  quantity: number;
+  market_value: number;
+  account_name: string;
+}
+
 export interface Portfolio {
   account_number: string;
   total_value: number;
@@ -103,6 +110,7 @@ export interface Portfolio {
   buying_power: number;
   currency: string;
   updated_at: string;
+  holdings: Holding[];
 }
 
 export interface PortfolioResponse {

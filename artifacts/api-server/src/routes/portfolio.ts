@@ -4,6 +4,17 @@ import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
+const MOCK_HOLDINGS = [
+  { symbol: "AAPL",  quantity: 10,  market_value: 2978.90, account_name: "Robinhood" },
+  { symbol: "NVDA",  quantity: 15,  market_value: 3153.00, account_name: "Robinhood" },
+  { symbol: "TSLA",  quantity: 8,   market_value: 3204.00, account_name: "Robinhood" },
+  { symbol: "SPY",   quantity: 5,   market_value: 3732.85, account_name: "Robinhood" },
+  { symbol: "MSFT",  quantity: 12,  market_value: 4408.44, account_name: "Robinhood" },
+  { symbol: "GOOGL", quantity: 6,   market_value: 2073.54, account_name: "Robinhood" },
+  { symbol: "META",  quantity: 20,  market_value: 9540.00, account_name: "Robinhood" },
+  { symbol: "AMZN",  quantity: 7,   market_value: 1596.28, account_name: "Robinhood" },
+];
+
 const MOCK_PORTFOLIO = {
   account_number: "MOCK-12345678",
   total_value: 999999.99,
@@ -16,6 +27,7 @@ const MOCK_PORTFOLIO = {
   buying_power: 88888.88,
   currency: "USD",
   updated_at: new Date().toISOString(),
+  holdings: MOCK_HOLDINGS,
 };
 
 router.get("/portfolio", async (_req, res) => {
@@ -45,6 +57,7 @@ router.get("/portfolio", async (_req, res) => {
           buying_power: parseFloat(account.buying_power),
           currency: "USD",
           updated_at: new Date().toISOString(),
+          holdings: MOCK_HOLDINGS, // Phase 2B: replace with live positions
         },
       });
       return;

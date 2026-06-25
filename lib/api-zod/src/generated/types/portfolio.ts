@@ -5,6 +5,7 @@
  * Trading Dashboard API
  * OpenAPI spec version: 0.1.0
  */
+import type { Holding } from './holding';
 
 export interface Portfolio {
   account_number: string;
@@ -18,4 +19,5 @@ export interface Portfolio {
   buying_power: number;
   currency: string;
   updated_at: string;
+  holdings: Holding[];
 }

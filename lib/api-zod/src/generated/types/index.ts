@@ -25,6 +25,7 @@ export * from './getAccountActivityStatus';
 export * from './getAccountActivityType';
 export * from './getQuotesParams';
 export * from './healthStatus';
+export * from './holding';
 export * from './marketIndex';
 export * from './marketStatus';
 export * from './marketSummaryData';
