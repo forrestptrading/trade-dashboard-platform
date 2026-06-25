@@ -125,7 +125,7 @@ router.get("/portfolio", async (_req, res) => {
       totalValue: 52341.87,
       buyingPower: 3241.56,
       cash: 3241.56,
-      dailyChange: 412.34,
+      dailyChange: 412.34,module
       dailyPercent: 0.79,
       positions: [],
     },
