@@ -35,7 +35,7 @@ async function getLiveHoldings() {
   const client = robinhoodClient as any;
 
   try {
-    let rawPositions: any[] = [];
+    let rawPositions: any = [];
 
     if (typeof client.getPositions === "function") {
       rawPositions = await client.getPositions();
