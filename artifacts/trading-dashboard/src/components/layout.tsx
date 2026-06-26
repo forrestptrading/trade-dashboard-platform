@@ -1,7 +1,8 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, CheckSquare, LayoutDashboard, LineChart, ListTree, LogOut } from "lucide-react";
+import { Activity, CheckSquare, LayoutDashboard, LineChart, ListTree, LogIn, LogOut, User } from "lucide-react";
 import { useGetApprovalsPending, useGetHealth, useGetQuotes } from "@workspace/api-client-react";
+import { useAuth } from "@/lib/auth-context";
 
 function TickerTape() {
   const { data: quotesRes } = useGetQuotes({ symbols: "SPY,QQQ,DIA,IWM,AAPL,MSFT,GOOGL,TSLA,NVDA,META" });
@@ -41,6 +42,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { data: health } = useGetHealth();
   const { data: pendingRes } = useGetApprovalsPending();
   const pendingCount = pendingRes?.count ?? 0;
+  const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useAuth();
 
   const navItems = [
     { href: "/dashboard", label: "Overview", icon: LayoutDashboard, badge: null },
@@ -75,18 +77,60 @@ export default function Layout({ children }: { children: ReactNode }) {
           </nav>
         </div>
         
-        <div className="p-4 border-t border-border">
-          <div className="flex items-center justify-between text-xs text-muted-foreground mb-4 px-2">
+        <div className="p-4 border-t border-border space-y-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-2">
             <span>SYS STATUS</span>
             <span className={`flex items-center gap-1.5 ${health?.status === 'ok' ? 'text-primary' : 'text-destructive'}`}>
               <span className={`h-2 w-2 rounded-full ${health?.status === 'ok' ? 'bg-primary' : 'bg-destructive'}`}></span>
               {health?.status === 'ok' ? 'ONLINE' : 'DEGRADED'}
             </span>
           </div>
-          <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted">
-            <LogOut className="h-4 w-4" />
-            <span>Sign Out</span>
-          </Link>
+
+          {/* Auth status: "Signed in as {email}" vs "Demo Mode" */}
+          <div
+            id="auth-status"
+            className={`rounded-md border px-3 py-2 ${
+              isAuthenticated
+                ? 'border-primary/30 bg-primary/5'
+                : 'border-yellow-500/30 bg-yellow-500/5'
+            }`}
+          >
+            {isAuthLoading ? (
+              <span className="text-xs text-muted-foreground font-mono">Checking session…</span>
+            ) : isAuthenticated ? (
+              <div className="flex items-center gap-2 min-w-0">
+                <User className="h-4 w-4 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Signed in as</p>
+                  <p className="text-xs font-mono truncate" title={user?.email}>{user?.email}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-yellow-400 shrink-0" />
+                <div>
+                  <p className="text-xs font-medium text-yellow-400">Demo Mode</p>
+                  <p className="text-[10px] text-muted-foreground">Showing sample data</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {isAuthenticated ? (
+            <button
+              id="logout-button"
+              onClick={() => logout()}
+              className="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted"
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Sign Out</span>
+            </button>
+          ) : (
+            <Link href="/login" className="flex items-center gap-3 px-3 py-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted">
+              <LogIn className="h-4 w-4" />
+              <span>Sign In</span>
+            </Link>
+          )}
         </div>
       </aside>
       
