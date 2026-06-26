@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -77,16 +77,17 @@ const MOCK_WATCHLIST = [
   },
 ];
 
-router.get("/watchlist", async (_req, res) => {
+router.get("/watchlist", async (req, res) => {
   if (useLiveData()) {
     try {
       // Live: GET /watchlists/Default/
       // Each item.instrument URL requires a second call to resolve symbol + name.
       // Quotes (price, change) need a follow-up GET /quotes/?symbols=...
-      const live = await robinhoodClient.getWatchlist();
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const live = await broker.getWatchlist();
 
       // Stub: transformation + instrument resolution goes here when implemented.
-      res.json({ success: true, source: "robinhood", count: live.results.length, data: live.results });
+      res.json({ success: true, source: broker.brokerId, count: live.results.length, data: live.results });
       return;
     } catch (err) {
       logger.warn(`[broker] getWatchlist failed, using mock: ${err instanceof Error ? err.message : err}`);

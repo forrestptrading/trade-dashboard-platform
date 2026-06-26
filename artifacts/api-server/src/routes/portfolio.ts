@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker, type BrokerClient } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -31,70 +31,42 @@ function number(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function getLiveHoldings() {
+/**
+ * Fetch holdings without throwing — a holdings failure should not collapse the
+ * whole portfolio response. Returns [] on any error (matching prior behavior).
+ */
+async function getHoldingsSafe(broker: BrokerClient) {
   try {
-    const positionsPage = await robinhoodClient.getPositions();
-    const positions = positionsPage.results ?? [];
-
-    logger.info(`[broker] getPositions returned ${positions.length} position(s)`);
-
-    if (positions.length === 0) return [];
-
-    // Resolve instrument_id → ticker symbol in batch
-    const symbolMap = await robinhoodClient.resolveSymbols(positions);
-
-    const holdings = positions
-      .map((position) => {
-        const symbol =
-          symbolMap.get(position.instrument_id) ||
-          position.instrument_id ||
-          "UNKNOWN";
-
-        const quantity = number(position.quantity);
-        const averageCost = number(position.average_buy_price);
-        const marketValue = number(position.equity);
-        const currentPrice = quantity > 0 ? marketValue / quantity : 0;
-
-        return {
-          symbol,
-          quantity,
-          average_cost: averageCost,
-          current_price: currentPrice,
-          market_value: marketValue,
-          account_name: "Robinhood",
-        };
-      })
-      .filter((h) => h.quantity > 0);
-
+    const holdings = await broker.getHoldings();
+    logger.info(`[portfolio] getHoldings returned ${holdings.length} holding(s)`);
     return holdings;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`[broker] getLiveHoldings failed: ${msg}`);
+    logger.warn(`[broker] getHoldings failed: ${msg}`);
     return [];
   }
 }
 
-router.get("/portfolio", async (_req, res) => {
+router.get("/portfolio", async (req, res) => {
   const live = useLiveData();
-  const authenticated = robinhoodClient.isAuthenticated();
-
-  logger.info(
-    `[portfolio] useLiveData=${live} isAuthenticated=${authenticated}`,
-  );
+  logger.info(`[portfolio] useLiveData=${live}`);
 
   if (live) {
-    if (!authenticated) {
-      logger.warn(
-        "[portfolio] USE_LIVE_DATA=true but ROBINHOOD_ACCESS_TOKEN is not set — " +
-          "portfolio/account endpoints require auth. Add ROBINHOOD_ACCESS_TOKEN to Replit Secrets.",
-      );
-    }
-
     try {
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const authenticated = broker.isAuthenticated();
+
+      if (!authenticated) {
+        logger.warn(
+          "[portfolio] USE_LIVE_DATA=true but the broker is not authenticated — " +
+            "portfolio/account endpoints require auth. Add the broker access token to Replit Secrets.",
+        );
+      }
+
       const [portfolio, account, holdings] = await Promise.all([
-        robinhoodClient.getPortfolio(),
-        robinhoodClient.getAccount(),
-        getLiveHoldings(),
+        broker.getPortfolio(),
+        broker.getAccount(),
+        getHoldingsSafe(broker),
       ]);
 
       const equity = number(portfolio.equity);
@@ -109,7 +81,7 @@ router.get("/portfolio", async (_req, res) => {
 
       res.json({
         success: true,
-        source: "robinhood",
+        source: broker.brokerId,
         data: {
           account_number: account.account_number,
           total_value: equity,

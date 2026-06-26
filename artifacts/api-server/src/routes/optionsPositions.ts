@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -64,16 +64,17 @@ const MOCK_OPTIONS_POSITIONS = [
   },
 ];
 
-router.get("/options/positions", async (_req, res) => {
+router.get("/options/positions", async (req, res) => {
   if (useLiveData()) {
     try {
       // Live: GET /options/positions/?nonzero=true
       // Each leg's option URL must be resolved for strike, expiration, type.
       // Greeks (delta, theta, iv) come from GET /marketdata/options/<id>/
-      const live = await robinhoodClient.getOptionsPositions();
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const live = await broker.getOptionsPositions();
 
       // Stub: transformation + option detail resolution goes here when implemented.
-      res.json({ success: true, source: "robinhood", count: live.results.length, data: live.results });
+      res.json({ success: true, source: broker.brokerId, count: live.results.length, data: live.results });
       return;
     } catch (err) {
       logger.warn(`[broker] getOptionsPositions failed, using mock: ${err instanceof Error ? err.message : err}`);

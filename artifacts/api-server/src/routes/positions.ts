@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -82,17 +82,18 @@ const MOCK_POSITIONS = [
   },
 ];
 
-router.get("/positions", async (_req, res) => {
+router.get("/positions", async (req, res) => {
   if (useLiveData()) {
     try {
       // Live: GET /positions/?nonzero=true
       // Each position.instrument URL must be resolved to symbol + name.
       // Transform shape to match our API contract before returning.
-      const live = await robinhoodClient.getPositions();
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const live = await broker.getPositions();
 
       // Stub: transformation logic goes here when implemented.
       // For now the stub throws, so this line is never reached.
-      res.json({ success: true, source: "robinhood", count: live.results.length, data: live.results });
+      res.json({ success: true, source: broker.brokerId, count: live.results.length, data: live.results });
       return;
     } catch (err) {
       logger.warn(`[broker] getPositions failed, using mock: ${err instanceof Error ? err.message : err}`);

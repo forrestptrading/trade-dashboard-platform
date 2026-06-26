@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -73,10 +73,10 @@ const MOCK_MOVERS = {
   ],
 };
 
-router.get("/market/summary", async (_req, res) => {
+router.get("/market/summary", async (req, res) => {
   const marketStatus = getMarketStatus();
   let indices = MOCK_INDICES;
-  let dataSource: "mock" | "robinhood" = "mock";
+  let dataSource: string = "mock";
 
   if (useLiveData()) {
     try {
@@ -84,7 +84,8 @@ router.get("/market/summary", async (_req, res) => {
       // Market hours from GET /markets/XNAS/hours/<date>/
       // Sectors have no Robinhood endpoint — remain mock or use Polygon.io later.
       const indexSymbols = ["SPY", "QQQ", "DIA", "IWM", "VIX"];
-      const quotes = await robinhoodClient.getQuotes(indexSymbols);
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const quotes = await broker.getQuotes(indexSymbols);
 
       const nameMap: Record<string, string> = {
         SPY: "S&P 500", QQQ: "Nasdaq 100", DIA: "Dow Jones", IWM: "Russell 2000", VIX: "CBOE Volatility",
@@ -104,7 +105,7 @@ router.get("/market/summary", async (_req, res) => {
         };
       });
 
-      dataSource = "robinhood";
+      dataSource = broker.brokerId;
     } catch (err) {
       logger.warn(`[broker] getQuotes (indices) failed, using mock: ${err instanceof Error ? err.message : err}`);
       indices = MOCK_INDICES;

@@ -12,6 +12,7 @@
  */
 
 import { BROKER_CONFIG, buildRequestHeaders, getOptionalAccessToken } from "./config.js";
+import type { BrokerClient, BrokerHolding, OrderRequest } from "./brokerClient.js";
 import type {
   BrokerSource,
   RobinhoodAccount,
@@ -69,7 +70,9 @@ async function fetchAllPages<T>(firstPath: string): Promise<T[]> {
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
-class RobinhoodClient {
+class RobinhoodClient implements BrokerClient {
+  readonly brokerId = "robinhood";
+
   /**
    * Returns true when a valid access token is configured.
    */
@@ -158,6 +161,44 @@ class RobinhoodClient {
   }
 
   /**
+   * Normalized holdings: fetches positions and resolves each instrument to a
+   * ticker symbol. Returns the shape consumed by the /portfolio route.
+   * Requires ROBINHOOD_ACCESS_TOKEN.
+   */
+  async getHoldings(): Promise<BrokerHolding[]> {
+    const positionsPage = await this.getPositions();
+    const positions = positionsPage.results ?? [];
+
+    if (positions.length === 0) return [];
+
+    const symbolMap = await this.resolveSymbols(positions);
+
+    return positions
+      .map((position) => {
+        const symbol =
+          symbolMap.get(position.instrument_id) ||
+          position.instrument_id ||
+          "UNKNOWN";
+
+        const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        const quantity = num(position.quantity);
+        const averageCost = num(position.average_buy_price);
+        const marketValue = num(position.equity);
+        const currentPrice = quantity > 0 ? marketValue / quantity : 0;
+
+        return {
+          symbol,
+          quantity,
+          average_cost: averageCost,
+          current_price: currentPrice,
+          market_value: marketValue,
+          account_name: "Robinhood",
+        };
+      })
+      .filter((h) => h.quantity > 0);
+  }
+
+  /**
    * GET https://api.robinhood.com/options/positions/?nonzero=true
    * Requires ROBINHOOD_ACCESS_TOKEN.
    */
@@ -168,6 +209,45 @@ class RobinhoodClient {
       "/options/positions/?nonzero=true",
     );
     return { results, next: null, previous: null };
+  }
+
+  /**
+   * Options chain lookup for a single symbol.
+   * TODO: implement against GET /options/instruments/?chain_symbol=<symbol>.
+   * Not yet wired to any route — throws until implemented so callers fall back.
+   */
+  async getOptions(
+    symbol: string,
+  ): Promise<RobinhoodPaginated<RobinhoodOptionsPosition>> {
+    throw new Error(
+      `[RobinhoodClient] getOptions(${symbol}) is not implemented yet.`,
+    );
+  }
+
+  // ── Trading (disabled — read-only integration) ───────────────────────────────
+
+  /**
+   * Placing orders is intentionally disabled — this integration is read-only.
+   * TODO: implement authenticated order placement (POST /orders/) behind an
+   * explicit opt-in once a secure trading flow and approvals exist.
+   */
+  async placeOrder(order: OrderRequest): Promise<RobinhoodOrder> {
+    throw new Error(
+      `[RobinhoodClient] placeOrder is disabled — this integration is read-only ` +
+        `(requested ${order.side} ${order.quantity} ${order.symbol}).`,
+    );
+  }
+
+  /**
+   * Cancelling orders is intentionally disabled — this integration is read-only.
+   * TODO: implement authenticated cancellation (POST /orders/<id>/cancel/) behind
+   * an explicit opt-in once a secure trading flow and approvals exist.
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    throw new Error(
+      `[RobinhoodClient] cancelOrder is disabled — this integration is read-only ` +
+        `(orderId=${orderId}).`,
+    );
   }
 
   // ── Quotes ─────────────────────────────────────────────────────────────────

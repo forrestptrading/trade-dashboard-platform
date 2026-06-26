@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -18,7 +18,7 @@ interface ActivityItem {
   status: ActivityStatus;
   date: string;
   description: string;
-  source: "mock" | "robinhood";
+  source: string;
 }
 
 const MOCK_ACTIVITY: ActivityItem[] = [
@@ -165,23 +165,24 @@ router.get("/account/activity", async (req, res) => {
   }
 
   let baseActivity = MOCK_ACTIVITY;
-  let dataSource: "mock" | "robinhood" = "mock";
+  let dataSource: string = "mock";
 
   if (useLiveData()) {
     try {
       // Live: merge GET /orders/ (buys/sells) + GET /dividends/
       // Each order.instrument URL must be resolved to symbol + name.
       // Map order.state → ActivityStatus, order.side → ActivityType
+      const broker = getBroker(req.query["broker"] as string | undefined);
       const [orders, dividends] = await Promise.all([
-        robinhoodClient.getOrders(),
-        robinhoodClient.getDividends(),
+        broker.getOrders(),
+        broker.getDividends(),
       ]);
 
       // Stub: transformation goes here when implemented.
       // For now the stub throws, so this block is unreachable.
       void orders;
       void dividends;
-      dataSource = "robinhood";
+      dataSource = broker.brokerId;
     } catch (err) {
       logger.warn(`[broker] getOrders/getDividends failed, using mock: ${err instanceof Error ? err.message : err}`);
     }

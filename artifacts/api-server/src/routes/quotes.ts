@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { useLiveData, robinhoodClient } from "../broker/index.js";
+import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -73,7 +73,8 @@ router.get("/quotes", async (req, res) => {
     try {
       // Live: GET /quotes/?symbols=AAPL,TSLA,NVDA
       // Fields: last_trade_price, previous_close, bid_price, ask_price, updated_at
-      const live = await robinhoodClient.getQuotes(requested);
+      const broker = getBroker(req.query["broker"] as string | undefined);
+      const live = await broker.getQuotes(requested);
 
       const data = live.map((q) => {
         const price = parseFloat(q.last_trade_price);
@@ -88,11 +89,11 @@ router.get("/quotes", async (req, res) => {
           bidPrice: parseFloat(q.bid_price),
           askPrice: parseFloat(q.ask_price),
           timestamp: q.updated_at,
-          source: "robinhood" as const,
+          source: broker.brokerId,
         };
       });
 
-      res.json({ success: true, source: "robinhood", count: data.length, data });
+      res.json({ success: true, source: broker.brokerId, count: data.length, data });
       return;
     } catch (err) {
       logger.warn(`[broker] getQuotes failed, using mock: ${err instanceof Error ? err.message : err}`);
