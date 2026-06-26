@@ -1,1 +1,2 @@
 - [Broker Manager architecture](broker-manager-architecture.md) — api-server routes resolve brokers via getBroker() inside the live try-block; report source: broker.brokerId; placeholder brokers throw → mock fallback.
+- [Auth foundation](auth-foundation.md) — session-based auth (scrypt hash, httpOnly sid cookie, SHA-256 token hash in sessions table); existing data routes stay public on purpose; /api/auth/* endpoints.

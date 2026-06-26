@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import authRouter from "./auth";
 import healthRouter from "./health";
 import portfolioRouter from "./portfolio";
 import positionsRouter from "./positions";
@@ -17,6 +18,7 @@ import aiCommandCenterRouter from "./aiCommandCenter";
 
 const router: IRouter = Router();
 
+router.use(authRouter);
 router.use(healthRouter);
 router.use(portfolioRouter);
 router.use(positionsRouter);
