@@ -15,6 +15,11 @@ import approvalsPendingRouter from "./approvalsPending";
 import alertsRouter from "./alerts";
 import aiOptionsAlertsRouter from "./aiOptionsAlerts";
 import aiCommandCenterRouter from "./aiCommandCenter";
+import analyticsRouter from "./analytics";
+import riskRouter from "./risk";
+import performanceRouter from "./performance";
+import aiTradesRouter from "./aiTrades";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -34,5 +39,10 @@ router.use(approvalsPendingRouter);
 router.use(alertsRouter);
 router.use(aiOptionsAlertsRouter);
 router.use(aiCommandCenterRouter);
+router.use(analyticsRouter);
+router.use(riskRouter);
+router.use(performanceRouter);
+router.use(aiTradesRouter);
+router.use(notificationsRouter);
 
 export default router;

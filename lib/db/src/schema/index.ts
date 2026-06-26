@@ -8,3 +8,5 @@ export * from "./userSettings";
 export * from "./watchlists";
 export * from "./journals";
 export * from "./aiPreferences";
+export * from "./aiTrades";
+export * from "./notifications";
