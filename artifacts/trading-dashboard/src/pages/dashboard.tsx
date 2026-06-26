@@ -2,6 +2,13 @@ import { useGetPortfolio, useGetMarketSummary, useGetAccountActivity } from "@wo
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatPercent } from "@/lib/utils";
+import {
+  AnalyticsSection,
+  RiskSection,
+  PerformanceSection,
+  AiTradeQueueSection,
+  NotificationsSection,
+} from "@/components/analytics-sections";
 
 export default function Dashboard() {
   const { data: portfolioRes, isLoading: isPortfolioLoading } = useGetPortfolio();
@@ -166,6 +173,16 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="border-t border-border/50 pt-8 space-y-10">
+        <AnalyticsSection />
+        <RiskSection />
+        <PerformanceSection />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+          <AiTradeQueueSection />
+          <NotificationsSection />
+        </div>
       </div>
     </div>
   );

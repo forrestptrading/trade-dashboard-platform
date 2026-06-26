@@ -1,3 +1,4 @@
 - [Broker Manager architecture](broker-manager-architecture.md) — api-server routes resolve brokers via getBroker() inside the live try-block; report source: broker.brokerId; placeholder brokers throw → mock fallback.
 - [Auth foundation](auth-foundation.md) — session-based auth (scrypt hash, httpOnly sid cookie, SHA-256 token hash in sessions table); existing data routes stay public on purpose; /api/auth/* endpoints.
 - [Trading workspace services](trading-services.md) — src/services/ pure compute over shared live-or-mock PortfolioSnapshot; per-user DB reads optionalAuth, writes requireAuth; rebuild lib/db decls after schema edits.
+- [API client composite reference](api-client-composite-ref.md) — composite TS project refs type-check against built dist; rebuild the referenced lib (tsc -b) after editing its src or dependents see stale decls.
