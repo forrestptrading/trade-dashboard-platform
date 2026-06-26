@@ -32,59 +32,28 @@ function number(value: unknown): number {
 }
 
 async function getLiveHoldings() {
-  const client = robinhoodClient as any;
-
   try {
-    let rawPositions: any = [];
+    const positionsPage = await robinhoodClient.getPositions();
+    const positions = positionsPage.results ?? [];
 
-    if (typeof client.getPositions === "function") {
-      rawPositions = await client.getPositions();
-    } else if (typeof client.getHoldings === "function") {
-      rawPositions = await client.getHoldings();
-    } else if (typeof client.getOpenPositions === "function") {
-      rawPositions = await client.getOpenPositions();
-    }
+    logger.info(`[broker] getPositions returned ${positions.length} position(s)`);
 
-    if (!Array.isArray(rawPositions)) {
-      rawPositions = rawPositions?.results || rawPositions?.data || [];
-    }
+    if (positions.length === 0) return [];
 
-    const holdings = rawPositions
-      .map((position: any) => {
+    // Resolve instrument_id → ticker symbol in batch
+    const symbolMap = await robinhoodClient.resolveSymbols(positions);
+
+    const holdings = positions
+      .map((position) => {
         const symbol =
-          position.symbol ||
-          position.ticker ||
-          position.instrument_symbol ||
-          position.name ||
+          symbolMap.get(position.instrument_id) ||
+          position.instrument_id ||
           "UNKNOWN";
 
-        const quantity = number(
-          position.quantity ||
-          position.shares ||
-          position.qty ||
-          position.units
-        );
-
-        const averageCost = number(
-          position.average_buy_price ||
-          position.average_cost ||
-          position.avg_cost ||
-          position.cost_basis_per_share
-        );
-
-        const currentPrice = number(
-          position.current_price ||
-          position.price ||
-          position.last_price ||
-          position.market_price
-        );
-
-        const marketValue = number(
-          position.market_value ||
-          position.value ||
-          position.equity ||
-          quantity * currentPrice
-        );
+        const quantity = number(position.quantity);
+        const averageCost = number(position.average_buy_price);
+        const marketValue = number(position.equity);
+        const currentPrice = quantity > 0 ? marketValue / quantity : 0;
 
         return {
           symbol,
@@ -95,22 +64,32 @@ async function getLiveHoldings() {
           account_name: "Robinhood",
         };
       })
-      .filter((holding: any) => holding.quantity > 0);
+      .filter((h) => h.quantity > 0);
 
     return holdings;
   } catch (err) {
-    logger.warn(
-      `[broker] getLiveHoldings failed: ${
-        err instanceof Error ? err.message : err
-      }`
-    );
-
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`[broker] getLiveHoldings failed: ${msg}`);
     return [];
   }
 }
 
 router.get("/portfolio", async (_req, res) => {
-  if (useLiveData()) {
+  const live = useLiveData();
+  const authenticated = robinhoodClient.isAuthenticated();
+
+  logger.info(
+    `[portfolio] useLiveData=${live} isAuthenticated=${authenticated}`,
+  );
+
+  if (live) {
+    if (!authenticated) {
+      logger.warn(
+        "[portfolio] USE_LIVE_DATA=true but ROBINHOOD_ACCESS_TOKEN is not set — " +
+          "portfolio/account endpoints require auth. Add ROBINHOOD_ACCESS_TOKEN to Replit Secrets.",
+      );
+    }
+
     try {
       const [portfolio, account, holdings] = await Promise.all([
         robinhoodClient.getPortfolio(),
@@ -123,6 +102,10 @@ router.get("/portfolio", async (_req, res) => {
       const cash = number(account.cash);
       const investedValue = number(portfolio.market_value);
       const dayChange = equity - prevEquity;
+
+      logger.info(
+        `[portfolio] live data fetched — equity=${equity} cash=${cash} holdings=${holdings.length}`,
+      );
 
       res.json({
         success: true,
@@ -146,11 +129,8 @@ router.get("/portfolio", async (_req, res) => {
 
       return;
     } catch (err) {
-      logger.warn(
-        `[broker] getPortfolio failed, using mock: ${
-          err instanceof Error ? err.message : err
-        }`
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[portfolio] live fetch failed — falling back to mock. Reason: ${msg}`);
     }
   }
 

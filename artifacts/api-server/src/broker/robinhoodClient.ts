@@ -1,8 +1,9 @@
 /**
  * RobinhoodClient — broker integration layer.
  *
- * Phase 2A: getQuotes() is live — calls api.robinhood.com/quotes/.
- * All other methods remain stubs — they throw NOT_IMPLEMENTED.
+ * Phase 2A: getQuotes() — live, public endpoint (no auth needed).
+ * Phase 2B: getPortfolio(), getAccount(), getPositions() — live, requires
+ *            ROBINHOOD_ACCESS_TOKEN in Replit Secrets.
  *
  * IMPORTANT:
  *  - Do NOT add order placement methods here.
@@ -10,11 +11,12 @@
  *  - Read-only data only.
  */
 
-import { BROKER_CONFIG, buildRequestHeaders } from "./config.js";
+import { BROKER_CONFIG, buildRequestHeaders, getOptionalAccessToken } from "./config.js";
 import type {
   BrokerSource,
   RobinhoodAccount,
   RobinhoodDividend,
+  RobinhoodInstrument,
   RobinhoodOrder,
   RobinhoodOptionsPosition,
   RobinhoodPaginated,
@@ -24,19 +26,55 @@ import type {
   RobinhoodWatchlistItem,
 } from "./types.js";
 
-const NOT_IMPLEMENTED = (method: string) =>
-  new Error(
-    `[RobinhoodClient] ${method} is not yet implemented. ` +
-      "Set USE_LIVE_DATA=true only after credentials are configured and this method is implemented.",
-  );
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+async function fetchRobinhood<T>(
+  urlOrPath: string,
+  timeoutMs = 8_000,
+): Promise<T> {
+  const url = urlOrPath.startsWith("http")
+    ? urlOrPath
+    : `${BROKER_CONFIG.baseUrl}${urlOrPath}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildRequestHeaders(),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `[RobinhoodClient] HTTP ${response.status} ${response.statusText} — ${url}` +
+        (body ? `\n${body.slice(0, 200)}` : ""),
+    );
+  }
+
+  return response.json() as Promise<T>;
+}
+
+/** Fetch all pages of a paginated endpoint and return the combined results. */
+async function fetchAllPages<T>(firstPath: string): Promise<T[]> {
+  const results: T[] = [];
+  let next: string | null = firstPath;
+
+  while (next) {
+    const page: RobinhoodPaginated<T> = await fetchRobinhood<RobinhoodPaginated<T>>(next);
+    results.push(...page.results);
+    next = page.next;
+  }
+
+  return results;
+}
+
+// ── Client ──────────────────────────────────────────────────────────────────
 
 class RobinhoodClient {
   /**
-   * Returns true when a valid access token is available.
-   * Currently always false — no auth is implemented yet.
+   * Returns true when a valid access token is configured.
    */
   isAuthenticated(): boolean {
-    return false;
+    return getOptionalAccessToken() !== null;
   }
 
   /**
@@ -50,59 +88,97 @@ class RobinhoodClient {
 
   /**
    * GET https://api.robinhood.com/portfolios/
-   * Returns the first portfolio (most accounts have exactly one).
+   * Requires ROBINHOOD_ACCESS_TOKEN. Returns the first portfolio.
    */
   async getPortfolio(): Promise<RobinhoodPortfolio> {
-    throw NOT_IMPLEMENTED("getPortfolio");
+    const page = await fetchRobinhood<RobinhoodPaginated<RobinhoodPortfolio>>(
+      "/portfolios/",
+    );
+
+    if (!page.results || page.results.length === 0) {
+      throw new Error("[RobinhoodClient] getPortfolio: no portfolios returned");
+    }
+
+    return page.results[0];
   }
 
   /**
    * GET https://api.robinhood.com/accounts/
-   * Returns account details including cash, buying power, account number.
+   * Requires ROBINHOOD_ACCESS_TOKEN. Returns the first account.
    */
   async getAccount(): Promise<RobinhoodAccount> {
-    throw NOT_IMPLEMENTED("getAccount");
+    const page = await fetchRobinhood<RobinhoodPaginated<RobinhoodAccount>>(
+      "/accounts/",
+    );
+
+    if (!page.results || page.results.length === 0) {
+      throw new Error("[RobinhoodClient] getAccount: no accounts returned");
+    }
+
+    return page.results[0];
   }
 
   // ── Positions ──────────────────────────────────────────────────────────────
 
   /**
    * GET https://api.robinhood.com/positions/?nonzero=true
-   * Returns all positions with a non-zero quantity.
-   * Each position's `instrument` URL must be resolved to get the symbol.
+   * Requires ROBINHOOD_ACCESS_TOKEN. Fetches all pages and returns combined.
    */
   async getPositions(): Promise<RobinhoodPaginated<RobinhoodPosition>> {
-    throw NOT_IMPLEMENTED("getPositions");
+    const results = await fetchAllPages<RobinhoodPosition>(
+      "/positions/?nonzero=true",
+    );
+
+    return { results, next: null, previous: null };
+  }
+
+  /**
+   * Batch-resolve instrument IDs to ticker symbols.
+   * Uses GET /instruments/?ids=id1,id2,... (chunked at 50 per request).
+   * Returns a Map of instrument_id → symbol.
+   */
+  async resolveSymbols(positions: RobinhoodPosition[]): Promise<Map<string, string>> {
+    const ids = [...new Set(positions.map((p) => p.instrument_id).filter(Boolean))];
+    const symbolMap = new Map<string, string>();
+
+    if (ids.length === 0) return symbolMap;
+
+    const CHUNK = 50;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const page = await fetchRobinhood<RobinhoodPaginated<RobinhoodInstrument>>(
+        `/instruments/?ids=${chunk.join(",")}`,
+      );
+      for (const instrument of page.results) {
+        symbolMap.set(instrument.id, instrument.symbol);
+      }
+    }
+
+    return symbolMap;
   }
 
   /**
    * GET https://api.robinhood.com/options/positions/?nonzero=true
-   * Returns open options positions. Each leg's `option` URL must be
-   * resolved to get strike, expiration, and type.
+   * Requires ROBINHOOD_ACCESS_TOKEN.
    */
   async getOptionsPositions(): Promise<
     RobinhoodPaginated<RobinhoodOptionsPosition>
   > {
-    throw NOT_IMPLEMENTED("getOptionsPositions");
+    const results = await fetchAllPages<RobinhoodOptionsPosition>(
+      "/options/positions/?nonzero=true",
+    );
+    return { results, next: null, previous: null };
   }
 
   // ── Quotes ─────────────────────────────────────────────────────────────────
 
   /**
    * GET https://api.robinhood.com/quotes/?symbols=AAPL,TSLA,NVDA
-   *
-   * Phase 2A: LIVE implementation.
-   * The endpoint is publicly accessible without auth, but a bearer token
-   * (ROBINHOOD_ACCESS_TOKEN) is used when available for better rate limits.
-   * Throws on network failure or non-200 response so callers can fall back
-   * to mock data.
-   *
-   * Never log or return the Authorization header value.
+   * Phase 2A: LIVE — publicly accessible without auth.
    */
   async getQuotes(symbols: string[]): Promise<RobinhoodQuote[]> {
     if (symbols.length === 0) return [];
 
-    // Robinhood accepts up to ~75 symbols per request; chunk if needed
     const chunks: string[][] = [];
     for (let i = 0; i < symbols.length; i += 70) {
       chunks.push(symbols.slice(i, i + 70));
@@ -114,19 +190,9 @@ class RobinhoodClient {
       const url = new URL(`${BROKER_CONFIG.baseUrl}/quotes/`);
       url.searchParams.set("symbols", chunk.join(","));
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: buildRequestHeaders(),
-        signal: AbortSignal.timeout(8_000), // 8s timeout per chunk
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `[RobinhoodClient] getQuotes HTTP ${response.status} for symbols: ${chunk.join(",")}`,
-        );
-      }
-
-      const body = (await response.json()) as { results: RobinhoodQuote[] };
+      const body = await fetchRobinhood<{ results: RobinhoodQuote[] }>(
+        url.toString(),
+      );
 
       if (!Array.isArray(body.results)) {
         throw new Error(
@@ -142,47 +208,38 @@ class RobinhoodClient {
 
   // ── Watchlist ──────────────────────────────────────────────────────────────
 
-  /**
-   * GET https://api.robinhood.com/watchlists/Default/
-   * Returns the user's default watchlist.
-   * Each item's `instrument` URL requires a second call to resolve the symbol.
-   */
   async getWatchlist(): Promise<RobinhoodPaginated<RobinhoodWatchlistItem>> {
-    throw NOT_IMPLEMENTED("getWatchlist");
+    return fetchRobinhood<RobinhoodPaginated<RobinhoodWatchlistItem>>(
+      "/watchlists/Default/",
+    );
   }
 
   // ── Activity ───────────────────────────────────────────────────────────────
 
-  /**
-   * GET https://api.robinhood.com/orders/
-   * Returns all orders (paginated). Filter by state=filled for completed trades.
-   * Each order's `instrument` URL requires a second call to resolve the symbol.
-   */
   async getOrders(
     options?: Partial<{ state: string; limit: number }>,
   ): Promise<RobinhoodPaginated<RobinhoodOrder>> {
-    throw NOT_IMPLEMENTED(`getOrders(${JSON.stringify(options ?? {})})`);
+    let path = "/orders/";
+    const params: string[] = [];
+    if (options?.state) params.push(`state=${options.state}`);
+    if (options?.limit) params.push(`page_size=${options.limit}`);
+    if (params.length > 0) path += `?${params.join("&")}`;
+
+    const results = await fetchAllPages<RobinhoodOrder>(path);
+    return { results, next: null, previous: null };
   }
 
-  /**
-   * GET https://api.robinhood.com/dividends/
-   * Returns dividend history. Filter by state=paid for completed dividends.
-   */
   async getDividends(): Promise<RobinhoodPaginated<RobinhoodDividend>> {
-    throw NOT_IMPLEMENTED("getDividends");
+    const results = await fetchAllPages<RobinhoodDividend>("/dividends/");
+    return { results, next: null, previous: null };
   }
 
   // ── Market Data ────────────────────────────────────────────────────────────
 
-  /**
-   * GET https://api.robinhood.com/markets/XNAS/hours/<YYYY-MM-DD>/
-   * Returns market hours for NASDAQ. Use for is_open, opens_at, closes_at.
-   * Note: indices (SPY/QQQ/DIA) are fetched via getQuotes(), not this endpoint.
-   */
   async getMarketHours(
     date: string,
   ): Promise<{ is_open: boolean; opens_at: string; closes_at: string }> {
-    throw NOT_IMPLEMENTED(`getMarketHours(${date})`);
+    return fetchRobinhood(`/markets/XNAS/hours/${date}/`);
   }
 }
 
