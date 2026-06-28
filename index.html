@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forrest Trading Dashboard</title>
+  <link rel="stylesheet" href="style.css?v=10.0" />
+</head>
+
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">FP</div>
+        <div>
+          <h1>Trading Hub</h1>
+          <p>Multi-platform dashboard</p>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <button class="nav-btn active" data-section="overview">Overview</button>
+        <button class="nav-btn" data-section="watchlist">Watchlist</button>
+        <button class="nav-btn" data-section="accounts">Accounts</button>
+        <button class="nav-btn" data-section="holdings">Holdings</button>
+        <button class="nav-btn" data-section="options">Options</button>
+        <button class="nav-btn" data-section="activity">Activity</button>
+        <button class="nav-btn" data-section="settings">Settings</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <p>Backend</p>
+        <span id="backendStatus">Checking...</span>
+
+        <p>Market Data: <strong id="quoteStatus">Loading...</strong></p>
+        <p>Last Updated: <strong id="lastQuoteUpdate">Not updated yet</strong></p>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h2>Portfolio Overview</h2>
+          <p>Live quotes, portfolio tracking, AI alerts, and trade approval.</p>
+        </div>
+
+        <button id="refreshQuotesBtn">Refresh Data</button>
+      </header>
+
+      <section id="overview" class="page-section active-section">
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span>Portfolio Value</span>
+            <strong id="portfolioValue">$0.00</strong>
+            <small id="portfolioSource">loading</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Buying Power</span>
+            <strong id="buyingPower">$0.00</strong>
+            <small>Available to trade</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Cash</span>
+            <strong id="cash">$0.00</strong>
+            <small>Cash balance</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Daily P/L</span>
+            <strong id="dailyPL">$0.00</strong>
+            <small id="dailyPercent">0.00%</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Open Positions</span>
+            <strong id="openPositions">0</strong>
+            <small id="accountCount">0 accounts connected</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Risk Score</span>
+            <strong id="riskScore">--</strong>
+            <small>Options risk level</small>
+          </article>
+        </div>
+
+        <section class="panel ai-command-panel">
+          <div class="panel-header">
+            <div>
+              <h3>AI Command Center</h3>
+              <p>Options alerts, breakouts, earnings watches, and risk signals.</p>
+            </div>
+          </div>
+
+          <div class="ai-command-summary">
+            <article class="summary-card">
+              <span>AI Confidence</span>
+              <strong id="aiConfidenceScore">--</strong>
+              <small>Overall signal score</small>
+            </article>
+
+            <article class="summary-card">
+              <span>Market Bias</span>
+              <strong id="aiMarketBias">Loading</strong>
+              <small>Current AI market view</small>
+            </article>
+          </div>
+
+          <div id="aiCommandSummary" class="muted">
+            Loading AI command center...
+          </div>
+
+          <div id="aiCommandAlerts" class="ai-alerts-container">
+            <p class="muted">Loading AI command alerts...</p>
+          </div>
+
+          <div id="aiOptionsAlerts" class="ai-alerts-container">
+            <p class="muted">Loading AI option alerts...</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Live Quotes</h3>
+              <p>Your watchlist powered by the backend.</p>
+            </div>
+
+            <form id="addTickerForm" class="inline-form">
+              <input id="tickerInput" type="text" placeholder="Add ticker" />
+              <button type="submit">Add</button>
+            </form>
+          </div>
+
+          <div id="quoteGrid" class="quote-grid"></div>
+        </section>
+      </section>
+
+      <section id="watchlist" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Watchlist</h3>
+              <p>Add or remove symbols from your live quote list.</p>
+            </div>
+
+            <form id="watchlistForm" class="inline-form">
+              <input id="watchlistInput" type="text" placeholder="Ticker" />
+              <button type="submit">Add</button>
+            </form>
+          </div>
+
+          <div id="watchlistTable" class="table-list"></div>
+        </section>
+      </section>
+
+      <section id="accounts" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Connected Accounts</h3>
+              <p>Brokerage connection status and balances.</p>
+            </div>
+
+            <button id="connectPlaidBtn">Connect With Plaid</button>
+          </div>
+
+          <div id="accountsList" class="card-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Broker Connections</h3>
+              <p>Robinhood, SoFi, Fidelity, Schwab, and Webull framework.</p>
+            </div>
+          </div>
+
+          <div id="brokerCards" class="card-grid"></div>
+        </section>
+      </section>
+
+      <section id="holdings" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Holdings</h3>
+              <p>Live holdings from the backend portfolio endpoint.</p>
+            </div>
+          </div>
+
+          <div id="holdingsTable" class="table-list"></div>
+        </section>
+      </section>
+
+      <section id="options" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Options Summary</h3>
+              <p>Open options, P/L, win rate, and risk.</p>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <article class="summary-card">
+              <span>Contracts</span>
+              <strong id="optionContracts">0</strong>
+              <small>Open contracts</small>
+            </article>
+
+            <article class="summary-card">
+              <span>Options P/L</span>
+              <strong id="optionsPL">$0.00</strong>
+              <small>Total unrealized</small>
+            </article>
+
+            <article class="summary-card">
+              <span>Win Rate</span>
+              <strong id="optionWinRate">0%</strong>
+              <small>Sample options</small>
+            </article>
+          </div>
+
+          <div id="openOptionsTable" class="table-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Options Risk Analysis</h3>
+              <p>Risk score based on current contract exposure.</p>
+            </div>
+          </div>
+
+          <div id="riskAnalysisBox"></div>
+        </section>
+      </section>
+
+      <section id="activity" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Pending Trade Approval</h3>
+              <p>Review AI or manual trade ideas before acting.</p>
+            </div>
+          </div>
+
+          <article class="approval-card">
+            <h4 id="approvalTicker">Loading...</h4>
+            <p id="approvalDescription">Loading trade idea...</p>
+
+            <div class="button-row">
+              <button id="approveTradeBtn">Approve</button>
+              <button id="rejectTradeBtn">Reject</button>
+            </div>
+          </article>
+
+          <div id="approvalHistory"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Trade Journal</h3>
+              <p>Log your trades and results.</p>
+            </div>
+          </div>
+
+          <form id="journalForm" class="journal-form">
+            <input id="journalTicker" type="text" placeholder="Ticker" />
+            <input id="journalStrategy" type="text" placeholder="Strategy" />
+            <input id="journalResult" type="text" placeholder="Result" />
+            <button type="submit">Save Entry</button>
+          </form>
+
+          <div id="journalEntries"></div>
+        </section>
+      </section>
+
+      <section id="settings" class="page-section">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Settings</h3>
+              <p>Dashboard preferences and backend health.</p>
+            </div>
+          </div>
+
+          <div class="settings-grid">
+            <div>
+              <label for="goalInput">Portfolio Goal</label>
+              <input id="goalInput" type="number" placeholder="Enter goal" />
+              <button id="saveGoalBtn">Save Goal</button>
+            </div>
+
+            <div>
+              <p id="backendHealthStatus">Checking backend...</p>
+              <button id="enableNotificationsBtn">Enable Notifications</button>
+              <button id="testNotificationBtn">Test Alert</button>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js?v=10.1"></script>
+</body>
+</html>
+
+
