@@ -14,6 +14,18 @@
  */
 
 import type {
+  BrokerAccountSummary,
+  BrokerDividend,
+  BrokerHoldingPosition,
+  BrokerOptionPosition,
+  BrokerProviderId,
+  BrokerSyncStatus,
+  BrokerTransaction,
+  BrokerOrder as NormalizedBrokerOrder,
+  NormalizedBrokerSnapshot,
+  BrokerMoney,
+} from "./model.js";
+import type {
   RobinhoodAccount,
   RobinhoodDividend,
   RobinhoodOptionsPosition,
@@ -59,7 +71,19 @@ export interface BrokerClient {
   isAuthenticated(): boolean;
 
   /** Stable identifier for this broker, e.g. "robinhood". Used as the response `source`. */
-  readonly brokerId: string;
+  readonly brokerId: BrokerProviderId;
+
+  // ── Broker Engine v1 normalized contract ───────────────────────────────────
+  getAccountSummary(): Promise<BrokerAccountSummary>;
+  getCash(): Promise<BrokerMoney>;
+  getBuyingPower(): Promise<BrokerMoney>;
+  getNormalizedHoldings(): Promise<BrokerHoldingPosition[]>;
+  getNormalizedOptions(): Promise<BrokerOptionPosition[]>;
+  getTransactions(): Promise<BrokerTransaction[]>;
+  getNormalizedDividends(): Promise<BrokerDividend[]>;
+  getNormalizedOrders(): Promise<NormalizedBrokerOrder[]>;
+  getSyncStatus(): Promise<BrokerSyncStatus>;
+  getNormalizedSnapshot(): Promise<NormalizedBrokerSnapshot>;
 
   // ── Extended read-only methods (used by existing routes) ────────────────────
   getAccount(): Promise<RobinhoodAccount>;
@@ -78,7 +102,7 @@ export interface BrokerClient {
  * Placeholder brokers extend this and only declare their `brokerId`.
  */
 export abstract class BaseBrokerClient implements BrokerClient {
-  abstract readonly brokerId: string;
+  abstract readonly brokerId: BrokerProviderId;
 
   protected notImplemented(method: string): never {
     throw new Error(
@@ -113,6 +137,36 @@ export abstract class BaseBrokerClient implements BrokerClient {
   }
   isAuthenticated(): boolean {
     return false;
+  }
+  getAccountSummary(): Promise<BrokerAccountSummary> {
+    return this.notImplemented("getAccountSummary");
+  }
+  getCash(): Promise<BrokerMoney> {
+    return this.notImplemented("getCash");
+  }
+  getBuyingPower(): Promise<BrokerMoney> {
+    return this.notImplemented("getBuyingPower");
+  }
+  getNormalizedHoldings(): Promise<BrokerHoldingPosition[]> {
+    return this.notImplemented("getNormalizedHoldings");
+  }
+  getNormalizedOptions(): Promise<BrokerOptionPosition[]> {
+    return this.notImplemented("getNormalizedOptions");
+  }
+  getTransactions(): Promise<BrokerTransaction[]> {
+    return this.notImplemented("getTransactions");
+  }
+  getNormalizedDividends(): Promise<BrokerDividend[]> {
+    return this.notImplemented("getNormalizedDividends");
+  }
+  getNormalizedOrders(): Promise<NormalizedBrokerOrder[]> {
+    return this.notImplemented("getNormalizedOrders");
+  }
+  getSyncStatus(): Promise<BrokerSyncStatus> {
+    return this.notImplemented("getSyncStatus");
+  }
+  getNormalizedSnapshot(): Promise<NormalizedBrokerSnapshot> {
+    return this.notImplemented("getNormalizedSnapshot");
   }
   getAccount(): Promise<RobinhoodAccount> {
     return this.notImplemented("getAccount");
