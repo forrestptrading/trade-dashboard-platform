@@ -2,7 +2,7 @@ import { db, brokerConnectionsTable, type BrokerConnection } from "@workspace/db
 import { encryptCredentialPayload } from "../lib/brokerCredentials.js";
 import type { BrokerProvider } from "./brokerConnectionsStore.js";
 
-export interface PlaidCredentialRecord {
+export interface PlaidCredentialRecord extends Record<string, unknown> {
   accessToken: string;
   itemId: string;
   provider: BrokerProvider;

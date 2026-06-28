@@ -9,6 +9,7 @@ import {
 import { logger } from "../lib/logger.js";
 import { optionalAuth } from "../middlewares/auth.js";
 import { persistPlaidBrokerConnection } from "../services/persistedBrokerConnections.js";
+import { getPlaidSnapshotsForUser } from "../services/plaidSnapshots.js";
 
 const router: IRouter = Router();
 
@@ -67,6 +68,23 @@ async function postPlaid<T>(path: string, body: Record<string, unknown>): Promis
 
   return response.json() as Promise<T>;
 }
+
+
+router.get("/plaid/snapshots", async (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: "Authentication required" });
+    return;
+  }
+
+  try {
+    const snapshots = await getPlaidSnapshotsForUser(req.user.id);
+    res.json({ success: true, source: "plaid", count: snapshots.length, data: snapshots });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: msg }, "[plaid] snapshot list failed");
+    res.status(500).json({ success: false, error: "Failed to load Plaid snapshots" });
+  }
+});
 
 router.post("/plaid/create-link-token", async (req, res) => {
   const parsed = createLinkTokenSchema.safeParse(req.body);
