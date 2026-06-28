@@ -5,7 +5,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Forrest Trading Dashboard</title>
-  <link rel="stylesheet" href="style.css?v=4.7" />
+  <base href="/trade-dashboard-platform/" />
+  <link rel="stylesheet" href="style.css?v=4.8" />
 </head>
 
 <body>
@@ -22,6 +23,10 @@
       <nav class="side-nav">
         <button class="nav-btn active" data-section="overview">Overview</button>
         <button class="nav-btn" data-section="watchlist">Watchlist</button>
+        <button class="nav-btn" data-section="marketWorkspace">Market</button>
+        <button class="nav-btn" data-section="newsCenter">News</button>
+        <button class="nav-btn" data-section="economicCalendar">Calendar</button>
+        <button class="nav-btn" data-section="optionsDashboard">Options Pro</button>
         <button class="nav-btn" data-section="accounts">Accounts</button>
         <button class="nav-btn" data-section="holdings">Holdings</button>
         <button class="nav-btn" data-section="options">Options</button>
@@ -46,6 +51,7 @@
         </div>
 
         <button id="refreshQuotesBtn">Refresh Data</button>
+        <button id="refreshPortfolioBtn">Refresh Portfolio</button>
       </header>
 
       <section id="overview" class="page-section active-section">
@@ -69,6 +75,12 @@
           </article>
 
           <article class="summary-card">
+            <span>Invested Value</span>
+            <strong id="investedValue">$0.00</strong>
+            <small>Market value invested</small>
+          </article>
+
+          <article class="summary-card">
             <span>Daily P/L</span>
             <strong id="dailyPL">$0.00</strong>
             <small id="dailyPercent">0.00%</small>
@@ -81,11 +93,57 @@
           </article>
 
           <article class="summary-card">
+            <span>Connection Status</span>
+            <strong id="portfolioConnectionStatus">Offline</strong>
+            <small id="portfolioLastSync">Last sync: never</small>
+            <small id="portfolioDataSource">Source: mock</small>
+          </article>
+
+          <article class="summary-card">
             <span>Risk Score</span>
             <strong id="riskScore">--</strong>
             <small>Options risk level</small>
           </article>
         </div>
+
+        <section class="panel aggregate-portfolio-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Aggregate Portfolio</h3>
+              <p>Unified Broker Engine view across available broker snapshots.</p>
+            </div>
+
+            <span id="aggregatePortfolioStatus" class="status-pill status-coming">Loading</span>
+          </div>
+
+          <div class="aggregate-portfolio-grid">
+            <article class="aggregate-portfolio-card">
+              <span>Total Value</span>
+              <strong id="aggregateTotalValue">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Cash</span>
+              <strong id="aggregateCash">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Buying Power</span>
+              <strong id="aggregateBuyingPower">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Invested Value</span>
+              <strong id="aggregateInvestedValue">$0.00</strong>
+            </article>
+          </div>
+
+          <div class="aggregate-portfolio-meta">
+            <span>Included Brokers: <strong id="aggregateIncludedBrokers">none</strong></span>
+            <span>Skipped Brokers: <strong id="aggregateSkippedBrokers">0</strong></span>
+            <span>Sync Status: <strong id="aggregateSyncStatus">loading</strong></span>
+          </div>
+        </section>
 
         <section class="panel ai-command-panel">
           <div class="panel-header">
@@ -155,6 +213,134 @@
 
           <div id="watchlistTable" class="table-list"></div>
         </section>
+
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Advanced Watchlist</h3>
+              <p>Sortable workspace ready for volume, market cap, and alert APIs.</p>
+            </div>
+
+            <input id="advancedWatchlistSearch" class="workspace-search" type="text" placeholder="Filter symbols" />
+          </div>
+
+          <div class="workspace-table-header advanced-watchlist-header">
+            <button data-watchlist-sort="symbol">Symbol</button>
+            <button data-watchlist-sort="price">Price</button>
+            <button data-watchlist-sort="percent">%</button>
+            <button data-watchlist-sort="volume">Volume</button>
+            <button data-watchlist-sort="marketCap">Market Cap</button>
+            <span>Alert</span>
+          </div>
+
+          <div id="advancedWatchlistTable" class="workspace-table"></div>
+        </section>
+      </section>
+
+      <section id="marketWorkspace" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Market Heat Map</h3>
+              <p>Sector performance and market breadth placeholders for future live APIs.</p>
+            </div>
+          </div>
+
+          <div id="marketHeatMap" class="heat-map-grid"></div>
+
+          <div class="workspace-grid compact-grid">
+            <article class="workspace-card">
+              <span>Advancers</span>
+              <strong id="marketAdvancers">--</strong>
+              <small>Market breadth placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>Decliners</span>
+              <strong id="marketDecliners">--</strong>
+              <small>Market breadth placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>New Highs</span>
+              <strong id="marketHighs">--</strong>
+              <small>52-week high placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>New Lows</span>
+              <strong id="marketLows">--</strong>
+              <small>52-week low placeholder</small>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section id="newsCenter" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>News Center</h3>
+              <p>Market, company, and watchlist news placeholders with API-ready feeds.</p>
+            </div>
+          </div>
+
+          <div class="workspace-grid news-grid">
+            <article class="workspace-card">
+              <h4>Market News</h4>
+              <div id="marketNewsFeed" class="news-feed"></div>
+            </article>
+            <article class="workspace-card">
+              <h4>Company News</h4>
+              <div id="companyNewsFeed" class="news-feed"></div>
+            </article>
+            <article class="workspace-card">
+              <h4>Watchlist News</h4>
+              <div id="watchlistNewsFeed" class="news-feed"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section id="economicCalendar" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Economic Calendar</h3>
+              <p>Upcoming macro and earnings events ready for economic data APIs.</p>
+            </div>
+          </div>
+
+          <div id="economicCalendarList" class="timeline-list"></div>
+        </section>
+      </section>
+
+      <section id="optionsDashboard" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Options Dashboard</h3>
+              <p>Unusual activity, IV, volume, and put/call placeholders for live backend data.</p>
+            </div>
+          </div>
+
+          <div class="workspace-grid compact-grid">
+            <article class="workspace-card">
+              <span>Put/Call Ratio</span>
+              <strong id="putCallRatio">--</strong>
+              <small>Live backend ready</small>
+            </article>
+            <article class="workspace-card">
+              <span>Highest IV</span>
+              <strong id="highestIvTicker">--</strong>
+              <small id="highestIvValue">Waiting for feed</small>
+            </article>
+            <article class="workspace-card">
+              <span>Highest Volume</span>
+              <strong id="highestOptionVolumeTicker">--</strong>
+              <small id="highestOptionVolumeValue">Waiting for feed</small>
+            </article>
+          </div>
+
+          <div id="unusualOptionsTable" class="workspace-table"></div>
+        </section>
       </section>
 
       <section id="accounts" class="page-section">
@@ -168,6 +354,7 @@
             <button id="connectPlaidBtn">Connect With Plaid</button>
           </div>
 
+          <div id="plaidStatusMessage" class="plaid-status muted">Plaid Link is ready.</div>
           <div id="accountsList" class="card-grid"></div>
         </section>
 
@@ -180,6 +367,20 @@
           </div>
 
           <div id="brokerCards" class="card-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Broker Engine Status</h3>
+              <p>Read-only backend adapter and capability status.</p>
+            </div>
+
+            <span id="brokerEngineStatus" class="status-pill status-coming">Loading</span>
+          </div>
+
+          <p id="brokerEngineUpdatedAt" class="muted">Last checked: never</p>
+          <div id="brokerEngineAdapters" class="broker-engine-grid"></div>
         </section>
       </section>
 
@@ -308,8 +509,6 @@
     </main>
   </div>
 
-  <script src="script.js?v=10.1"></script>
+  <script src="script.js?v=10.2"></script>
 </body>
 </html>
-
-
