@@ -12,6 +12,8 @@ const STORAGE_KEYS = {
 let quotes = {};
 let watchlist = loadFromStorage(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
 let livePortfolio = null;
+let livePortfolioSource = "mock";
+let portfolioFetchStatus = "offline";
 let aiCommandCenter = null;
 let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
 let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
@@ -403,13 +405,20 @@ function getQuotePercent(quote) {
 async function fetchPortfolio() {
   try {
     const response = await fetch(`${BACKEND_URL}/api/portfolio`);
+
+    if (!response.ok) {
+      throw new Error(`Portfolio request failed with ${response.status}`);
+    }
+
     const result = await response.json();
 
-    if (!result.success || !result.data) {
-      throw new Error("Portfolio response failed");
+    if (!result.success || !result.data || typeof result.data !== "object") {
+      throw new Error("Portfolio response missing success/data");
     }
 
     livePortfolio = result.data;
+    livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
+    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "offline";
 
     setBackendStatus("Live", true);
 
@@ -417,14 +426,28 @@ async function fetchPortfolio() {
     renderAccountsList();
     renderHoldingsTable();
   } catch (error) {
-    console.warn("Portfolio fetch unavailable:", error);
+    console.warn("Portfolio fetch unavailable; using mock fallback:", error);
 
     livePortfolio = null;
+    livePortfolioSource = "mock";
+    portfolioFetchStatus = "offline";
 
     renderPortfolioSummary();
     renderAccountsList();
     renderHoldingsTable();
   }
+}
+
+function normalizePortfolioSource(source) {
+  const normalized = String(source || "mock").trim().toLowerCase();
+
+  if (normalized === "robinhood") return "robinhood";
+
+  return "mock";
+}
+
+function getPortfolioSourceLabel() {
+  return `${livePortfolioSource}/${portfolioFetchStatus}`;
 }
 
 function getPortfolioValue(keyList, fallback = 0) {
@@ -448,28 +471,30 @@ function getLiveHoldings() {
     livePortfolio.securities ||
     livePortfolio.accounts?.[0]?.holdings ||
     livePortfolio.accounts?.[0]?.positions ||
+    livePortfolio.account?.holdings ||
+    livePortfolio.account?.positions ||
     []
   );
 }
 
 function renderPortfolioSummary() {
   const totalValue = getPortfolioValue(
-    ["total_value", "totalValue", "balance", "equity"],
+    ["total_value", "totalValue", "total", "balance", "equity", "account_value"],
     52341.87
   );
 
   const buyingPower = getPortfolioValue(
-    ["buying_power", "buyingPower"],
+    ["buying_power", "buyingPower", "available_buying_power"],
     3241.56
   );
 
   const cash = getPortfolioValue(
-    ["cash", "cash_balance"],
+    ["cash", "cash_balance", "cashBalance", "cash_available"],
     3241.56
   );
 
   const investedValue = getPortfolioValue(
-    ["invested_value", "investedValue"],
+    ["invested_value", "investedValue", "market_value", "marketValue"],
     totalValue - cash
   );
 
@@ -491,8 +516,10 @@ function renderPortfolioSummary() {
   setText("dailyPL", formatCurrency(dayChange));
   setText("dailyPercent", formatPercent(dayChangePercent));
   setText("openPositions", holdings.length || livePortfolio?.open_positions || 4);
-  setText("accountCount", livePortfolio ? "1 account connected" : "0 accounts connected");
-  setText("portfolioSource", livePortfolio ? "live" : "demo");
+  const accountCount = safeArray(livePortfolio?.accounts).length || (livePortfolio?.account_number ? 1 : 0);
+
+  setText("accountCount", livePortfolioSource === "robinhood" ? `${accountCount || 1} account connected` : "mock fallback");
+  setText("portfolioSource", getPortfolioSourceLabel());
 
   setClass("dailyPL", getChangeClass(dayChange));
   setClass("dailyPercent", getChangeClass(dayChange));
@@ -508,17 +535,17 @@ function renderAccountsList() {
   if (!accountsList) return;
 
   if (livePortfolio) {
-    const accountName = livePortfolio.account_name || "Robinhood";
-    const totalValue = getPortfolioValue(["total_value", "totalValue", "balance", "equity"]);
-    const buyingPower = getPortfolioValue(["buying_power", "buyingPower"]);
-    const cash = getPortfolioValue(["cash", "cash_balance"]);
+    const accountName = livePortfolio.account_name || livePortfolio.broker || (livePortfolioSource === "robinhood" ? "Robinhood" : "Mock Portfolio");
+    const totalValue = getPortfolioValue(["total_value", "totalValue", "total", "balance", "equity", "account_value"]);
+    const buyingPower = getPortfolioValue(["buying_power", "buyingPower", "available_buying_power"]);
+    const cash = getPortfolioValue(["cash", "cash_balance", "cashBalance", "cash_available"]);
 
     accountsList.innerHTML = `
       <article class="account-card">
         <h4>${accountName}</h4>
 
-        <span class="status-pill status-connected">
-          Connected
+        <span class="status-pill ${livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
+          ${livePortfolioSource === "robinhood" ? "Connected" : "Mock Fallback"}
         </span>
 
         <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
@@ -553,7 +580,7 @@ function renderBrokerCards() {
 
   brokerCards.innerHTML = brokers.map((broker) => {
     const connected =
-      livePortfolio &&
+      livePortfolioSource === "robinhood" &&
       broker.id === "robinhood";
 
     return `
@@ -583,7 +610,7 @@ function connectBroker(accountId) {
 
   if (!broker) return;
 
-  if (broker.id === "robinhood" && livePortfolio) {
+  if (broker.id === "robinhood" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     alert("Robinhood sync started.");
     return;
