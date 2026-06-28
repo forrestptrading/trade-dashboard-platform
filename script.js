@@ -304,7 +304,7 @@ async function checkBackendHealth() {
     setBackendStatus("Live", true);
     setText("backendHealthStatus", "Backend is live.");
   } catch (error) {
-    console.error("Backend health check failed:", error);
+    console.warn("Backend health check unavailable:", error);
     setBackendStatus("Offline", false);
     setText("backendHealthStatus", "Backend is offline or blocked.");
   }
@@ -359,7 +359,7 @@ async function fetchQuotes() {
     renderWatchlistTable();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Quote fetch failed:", error);
+    console.warn("Quote fetch unavailable:", error);
 
     setBackendStatus("Offline", false);
     setText("quoteStatus", "Quotes failed");
@@ -411,16 +411,13 @@ async function fetchPortfolio() {
 
     livePortfolio = result.data;
 
-    console.log("LIVE PORTFOLIO DATA:", livePortfolio);
-    console.log("LIVE HOLDINGS:", getLiveHoldings());
-
     setBackendStatus("Live", true);
 
     renderPortfolioSummary();
     renderAccountsList();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Portfolio fetch failed:", error);
+    console.warn("Portfolio fetch unavailable:", error);
 
     livePortfolio = null;
 
@@ -1056,7 +1053,7 @@ async function fetchAiCommandCenter() {
     aiCommandCenter = result.data;
     renderAiCommandCenter();
   } catch (error) {
-    console.error("AI command center failed:", error);
+    console.warn("AI command center unavailable:", error);
     aiCommandCenter = null;
     renderAiCommandCenter();
   }
