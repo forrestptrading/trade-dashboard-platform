@@ -2,6 +2,7 @@ export { useLiveData, assertReadOnly, BROKER_CONFIG } from "./config.js";
 export { robinhoodClient } from "./robinhoodClient.js";
 export { BROKER_CAPABILITY_MATRIX, getBrokerCapabilities } from "./capabilities.js";
 export { BrokerEngine, brokerEngine } from "./engine.js";
+export { aggregateBrokerSnapshots } from "./aggregate.js";
 export {
   getBroker,
   getDefaultBroker,
@@ -24,3 +25,9 @@ export type {
   BrokerTransaction,
   NormalizedBrokerSnapshot,
 } from "./model.js";
+export type {
+  BrokerBreakdownItem,
+  SkippedBrokerStatus,
+  UnifiedPortfolio,
+  UnifiedPortfolioSyncStatus,
+} from "./aggregate.js";

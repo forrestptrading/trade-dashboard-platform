@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import {
   BROKER_CAPABILITY_MATRIX,
+  aggregateBrokerSnapshots,
   brokerEngine,
   getBroker,
   listBrokers,
@@ -8,6 +9,7 @@ import {
   type BrokerProviderId,
   type BrokerSyncState,
   type NormalizedBrokerSnapshot,
+  type SkippedBrokerStatus,
 } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
@@ -102,6 +104,75 @@ router.get("/broker-engine/adapters", (_req, res) => {
   res.json({
     success: true,
     data: listBrokers().map(adapterSummary),
+  });
+});
+
+async function getAggregateSnapshot(
+  brokerId: BrokerProviderId,
+): Promise<{ snapshot?: NormalizedBrokerSnapshot; skipped?: SkippedBrokerStatus }> {
+  if (!IMPLEMENTED_BROKERS.has(brokerId)) {
+    return {
+      skipped: {
+        broker_id: brokerId,
+        reason: `${BROKER_NAMES[brokerId]} adapter is registered but not implemented yet.`,
+        status: "not_implemented",
+      },
+    };
+  }
+
+  const broker = getBroker(brokerId);
+
+  if (!useLiveData()) {
+    return {
+      snapshot: unavailableSnapshot(
+        brokerId,
+        "mock",
+        "Live broker data is disabled; included as an empty normalized mock snapshot.",
+      ),
+    };
+  }
+
+  if (!broker.isAuthenticated()) {
+    return {
+      skipped: {
+        broker_id: brokerId,
+        reason: `${BROKER_NAMES[brokerId]} credentials are not configured.`,
+        status: "not_configured",
+      },
+    };
+  }
+
+  try {
+    return { snapshot: await brokerEngine.getSnapshot(brokerId) };
+  } catch (error) {
+    logger.warn(
+      { broker: brokerId, err: error instanceof Error ? error.message : String(error) },
+      "[broker-engine] aggregate snapshot skipped",
+    );
+
+    return {
+      skipped: {
+        broker_id: brokerId,
+        reason: "Broker snapshot failed. Check server logs for sanitized details.",
+        status: "error",
+      },
+    };
+  }
+}
+
+router.get("/broker-engine/aggregate", async (_req, res) => {
+  const results = await Promise.all(listBrokers().map((brokerId) => getAggregateSnapshot(brokerId)));
+  const snapshots = results
+    .map((result) => result.snapshot)
+    .filter((snapshot): snapshot is NormalizedBrokerSnapshot => Boolean(snapshot));
+  const skippedBrokers = results
+    .map((result) => result.skipped)
+    .filter((skipped): skipped is SkippedBrokerStatus => Boolean(skipped));
+
+  res.json({
+    success: true,
+    source: "broker-engine",
+    data: aggregateBrokerSnapshots(snapshots, skippedBrokers),
   });
 });
 
