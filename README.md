@@ -1,0 +1,1 @@
+A personal trading dashboard that integrates Robinhood MCP to provide real-time account monitoring, portfolio analytics, options tracking, watchlist management, and AI-powered risk analysis. Designed with strict trade confirmation guardrails, ensuring no orders are executed without explicit user approval.
