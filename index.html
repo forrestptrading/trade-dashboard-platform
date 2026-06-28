@@ -106,6 +106,45 @@
           </article>
         </div>
 
+        <section class="panel aggregate-portfolio-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Aggregate Portfolio</h3>
+              <p>Unified Broker Engine view across available broker snapshots.</p>
+            </div>
+
+            <span id="aggregatePortfolioStatus" class="status-pill status-coming">Loading</span>
+          </div>
+
+          <div class="aggregate-portfolio-grid">
+            <article class="aggregate-portfolio-card">
+              <span>Total Value</span>
+              <strong id="aggregateTotalValue">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Cash</span>
+              <strong id="aggregateCash">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Buying Power</span>
+              <strong id="aggregateBuyingPower">$0.00</strong>
+            </article>
+
+            <article class="aggregate-portfolio-card">
+              <span>Invested Value</span>
+              <strong id="aggregateInvestedValue">$0.00</strong>
+            </article>
+          </div>
+
+          <div class="aggregate-portfolio-meta">
+            <span>Included Brokers: <strong id="aggregateIncludedBrokers">none</strong></span>
+            <span>Skipped Brokers: <strong id="aggregateSkippedBrokers">0</strong></span>
+            <span>Sync Status: <strong id="aggregateSyncStatus">loading</strong></span>
+          </div>
+        </section>
+
         <section class="panel ai-command-panel">
           <div class="panel-header">
             <div>
@@ -473,4 +512,3 @@
   <script src="script.js?v=10.2"></script>
 </body>
 </html>
-

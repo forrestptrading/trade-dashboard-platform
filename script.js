@@ -28,6 +28,8 @@ let brokerEngineCapabilities = {};
 let brokerEngineAdapters = [];
 let brokerEngineStatus = "loading";
 let brokerEngineLastCheckedAt = null;
+let aggregatePortfolio = null;
+let aggregatePortfolioStatus = "loading";
 
 const sectorPerformance = [
   { sector: "Technology", change: 1.42, breadth: "Strong" },
@@ -148,6 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
   runSafely("portfolio fetch", fetchPortfolio);
   runSafely("broker connections fetch", fetchBrokerConnections);
   runSafely("broker engine status fetch", fetchBrokerEngineStatus);
+  runSafely("aggregate portfolio fetch", fetchAggregatePortfolio);
   runSafely("AI command center fetch", fetchAiCommandCenter);
 
   setInterval(() => runSafely("quotes interval", fetchQuotes), 30000);
@@ -313,6 +316,7 @@ function setupButtons() {
     refreshQuotesBtn.addEventListener("click", () => {
       fetchQuotes();
       fetchPortfolio();
+      fetchAggregatePortfolio();
       fetchAiCommandCenter();
     });
   }
@@ -320,7 +324,10 @@ function setupButtons() {
   const refreshPortfolioBtn = document.getElementById("refreshPortfolioBtn");
 
   if (refreshPortfolioBtn) {
-    refreshPortfolioBtn.addEventListener("click", fetchPortfolio);
+    refreshPortfolioBtn.addEventListener("click", () => {
+      fetchPortfolio();
+      fetchAggregatePortfolio();
+    });
   }
 
   const connectPlaidBtn = document.getElementById("connectPlaidBtn");
@@ -388,6 +395,7 @@ function setupProfessionalWorkspaceControls() {
 
 function renderAll() {
   renderPortfolioSummary();
+  renderAggregatePortfolio();
   renderWatchlistCards();
   renderWatchlistTable();
   renderAccountsList();
@@ -768,6 +776,23 @@ async function fetchBrokerEngineStatus() {
   }
 }
 
+async function fetchAggregatePortfolio() {
+  try {
+    aggregatePortfolioStatus = "loading";
+    renderAggregatePortfolio();
+
+    const result = await apiFetchJson("/api/broker-engine/aggregate");
+
+    aggregatePortfolio = result.data || null;
+    aggregatePortfolioStatus = "live";
+  } catch (error) {
+    console.warn("Aggregate portfolio unavailable:", error);
+    aggregatePortfolioStatus = "offline";
+  } finally {
+    renderAggregatePortfolio();
+  }
+}
+
 async function createBrokerConnection(provider) {
   const result = await apiFetchJson("/api/broker-connections", {
     method: "POST",
@@ -891,6 +916,32 @@ async function connectWithPlaid(provider) {
 }
 
 /* ACCOUNTS */
+
+function renderAggregatePortfolio() {
+  const statusEl = document.getElementById("aggregatePortfolioStatus");
+  if (!statusEl) return;
+
+  const isLive = aggregatePortfolioStatus === "live";
+  const isOffline = aggregatePortfolioStatus === "offline";
+
+  statusEl.textContent = isLive ? "Live" : isOffline ? "Offline" : "Loading";
+  statusEl.className = `status-pill ${isLive ? "status-connected" : isOffline ? "status-disconnected" : "status-coming"}`;
+
+  const syncStatus = aggregatePortfolio?.sync_status || {};
+  const includedBrokers = safeArray(syncStatus.included_brokers);
+  const skippedBrokers = safeArray(syncStatus.skipped_brokers);
+
+  setText("aggregateTotalValue", formatCurrency(aggregatePortfolio?.total_value));
+  setText("aggregateCash", formatCurrency(aggregatePortfolio?.cash));
+  setText("aggregateBuyingPower", formatCurrency(aggregatePortfolio?.buying_power));
+  setText("aggregateInvestedValue", formatCurrency(aggregatePortfolio?.invested_value));
+  setText("aggregateIncludedBrokers", includedBrokers.length ? includedBrokers.join(", ") : "none");
+  setText("aggregateSkippedBrokers", String(skippedBrokers.length || 0));
+  setText(
+    "aggregateSyncStatus",
+    isOffline ? "offline" : syncStatus.state || aggregatePortfolioStatus
+  );
+}
 
 function renderAccountsList() {
   const accountsList = document.getElementById("accountsList");
