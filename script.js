@@ -427,6 +427,7 @@ async function fetchPortfolio() {
     livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
     portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
     portfolioLastSyncAt = new Date();
+    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "offline";
 
     setBackendStatus("Live", true);
 
