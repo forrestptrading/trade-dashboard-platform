@@ -329,6 +329,20 @@
 
           <div id="brokerCards" class="card-grid"></div>
         </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Broker Engine Status</h3>
+              <p>Read-only backend adapter and capability status.</p>
+            </div>
+
+            <span id="brokerEngineStatus" class="status-pill status-coming">Loading</span>
+          </div>
+
+          <p id="brokerEngineUpdatedAt" class="muted">Last checked: never</p>
+          <div id="brokerEngineAdapters" class="broker-engine-grid"></div>
+        </section>
       </section>
 
       <section id="holdings" class="page-section">
@@ -459,5 +473,4 @@
   <script src="script.js?v=10.2"></script>
 </body>
 </html>
-
 

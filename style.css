@@ -320,6 +320,32 @@ body {
   margin-bottom: 8px;
 }
 
+.broker-engine-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit,minmax(240px,1fr));
+}
+
+.broker-engine-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.broker-engine-card-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.broker-engine-capabilities {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 .status-pill {
   display: inline-block;
   padding: 5px 9px;

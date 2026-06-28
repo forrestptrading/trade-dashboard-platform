@@ -24,6 +24,10 @@ let advancedWatchlistFilter = "";
 let brokerConnections = [];
 let plaidMessage = "Plaid Link is ready.";
 let plaidBusyProvider = null;
+let brokerEngineCapabilities = {};
+let brokerEngineAdapters = [];
+let brokerEngineStatus = "loading";
+let brokerEngineLastCheckedAt = null;
 
 const sectorPerformance = [
   { sector: "Technology", change: 1.42, breadth: "Strong" },
@@ -143,6 +147,7 @@ document.addEventListener("DOMContentLoaded", () => {
   runSafely("quotes fetch", fetchQuotes);
   runSafely("portfolio fetch", fetchPortfolio);
   runSafely("broker connections fetch", fetchBrokerConnections);
+  runSafely("broker engine status fetch", fetchBrokerEngineStatus);
   runSafely("AI command center fetch", fetchAiCommandCenter);
 
   setInterval(() => runSafely("quotes interval", fetchQuotes), 30000);
@@ -191,6 +196,15 @@ function setText(id, value) {
 function setClass(id, className) {
   const el = document.getElementById(id);
   if (el) el.className = className;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function formatCurrency(value) {
@@ -378,6 +392,7 @@ function renderAll() {
   renderWatchlistTable();
   renderAccountsList();
   renderBrokerCards();
+  renderBrokerEngineStatus();
   renderPlaidStatus();
   renderHoldingsTable();
   renderOptions();
@@ -730,6 +745,29 @@ async function fetchBrokerConnections() {
   }
 }
 
+async function fetchBrokerEngineStatus() {
+  try {
+    brokerEngineStatus = "loading";
+    renderBrokerEngineStatus();
+
+    const [capabilitiesResult, adaptersResult] = await Promise.all([
+      apiFetchJson("/api/broker-engine/capabilities"),
+      apiFetchJson("/api/broker-engine/adapters")
+    ]);
+
+    brokerEngineCapabilities = capabilitiesResult.data || {};
+    brokerEngineAdapters = safeArray(adaptersResult.data);
+    brokerEngineStatus = "live";
+    brokerEngineLastCheckedAt = new Date();
+  } catch (error) {
+    console.warn("Broker Engine status unavailable:", error);
+    brokerEngineStatus = "offline";
+    brokerEngineAdapters = [];
+  } finally {
+    renderBrokerEngineStatus();
+  }
+}
+
 async function createBrokerConnection(provider) {
   const result = await apiFetchJson("/api/broker-connections", {
     method: "POST",
@@ -965,6 +1003,74 @@ function renderBrokerCards() {
         <button onclick="connectBroker('${broker.id}')" ${isBusy ? "disabled" : ""}>
           ${connected ? "Sync Account" : isBusy ? "Connecting..." : "Connect"}
         </button>
+      </article>
+    `;
+  }).join("");
+}
+
+function formatCapability(value) {
+  return value ? "Yes" : "No";
+}
+
+function renderBrokerEngineStatus() {
+  const statusEl = document.getElementById("brokerEngineStatus");
+  const updatedAtEl = document.getElementById("brokerEngineUpdatedAt");
+  const adaptersEl = document.getElementById("brokerEngineAdapters");
+
+  if (!statusEl || !updatedAtEl || !adaptersEl) return;
+
+  const isLive = brokerEngineStatus === "live";
+  const isOffline = brokerEngineStatus === "offline";
+
+  statusEl.textContent = isLive ? "Live" : isOffline ? "Offline" : "Loading";
+  statusEl.className = `status-pill ${isLive ? "status-connected" : isOffline ? "status-disconnected" : "status-coming"}`;
+  updatedAtEl.textContent = brokerEngineLastCheckedAt
+    ? `Last checked: ${brokerEngineLastCheckedAt.toLocaleTimeString()}`
+    : "Last checked: never";
+
+  if (isOffline) {
+    adaptersEl.innerHTML = `
+      <article class="broker-engine-card">
+        <h4>Broker Engine Unavailable</h4>
+        <p class="muted">The backend status endpoints are offline. Portfolio, quotes, and Plaid fallback behavior remain unchanged.</p>
+      </article>
+    `;
+    return;
+  }
+
+  if (!brokerEngineAdapters.length) {
+    adaptersEl.innerHTML = `
+      <article class="broker-engine-card">
+        <h4>Loading Broker Engine</h4>
+        <p class="muted">Checking registered adapters and read-only capabilities...</p>
+      </article>
+    `;
+    return;
+  }
+
+  adaptersEl.innerHTML = brokerEngineAdapters.map((adapter) => {
+    const capabilities = adapter.capabilities || brokerEngineCapabilities[adapter.id] || {};
+    const implemented = Boolean(adapter.implemented);
+    const authenticated = Boolean(adapter.authenticated);
+
+    return `
+      <article class="broker-engine-card">
+        <div class="broker-engine-card-header">
+          <h4>${escapeHtml(adapter.name || adapter.id)}</h4>
+          <span class="status-pill ${implemented ? "status-connected" : "status-coming"}">
+            ${implemented ? "Implemented" : "Stubbed"}
+          </span>
+        </div>
+
+        <p>Adapter ID: <strong>${escapeHtml(adapter.id)}</strong></p>
+        <p>Authenticated: <strong>${authenticated ? "Yes" : "No"}</strong></p>
+        <div class="broker-engine-capabilities">
+          <span>Holdings: <strong>${formatCapability(capabilities.supportsHoldings)}</strong></span>
+          <span>Options: <strong>${formatCapability(capabilities.supportsOptions)}</strong></span>
+          <span>Transactions: <strong>${formatCapability(capabilities.supportsTransactions)}</strong></span>
+          <span>Dividends: <strong>${formatCapability(capabilities.supportsDividends)}</strong></span>
+          <span>Real-time Quotes: <strong>${formatCapability(capabilities.supportsRealTimeQuotes)}</strong></span>
+        </div>
       </article>
     `;
   }).join("");
@@ -1739,6 +1845,3 @@ function addCommandAlertToApprovalQueue(index) {
 
   alert(`${alert.ticker} added to approval queue.`);
 }
-
-
-
