@@ -19,6 +19,7 @@ export type {
   BrokerOptionPosition,
   BrokerOrder,
   BrokerProviderId,
+  BrokerSyncState,
   BrokerSyncStatus,
   BrokerTransaction,
   NormalizedBrokerSnapshot,
