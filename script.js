@@ -12,10 +12,64 @@ const STORAGE_KEYS = {
 let quotes = {};
 let watchlist = loadFromStorage(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
 let livePortfolio = null;
+let livePortfolioSource = "mock";
+let portfolioFetchStatus = "offline";
+let portfolioLastSyncAt = null;
 let aiCommandCenter = null;
 let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
 let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
 let currentPendingIndex = 0;
+let advancedWatchlistSort = "symbol";
+let advancedWatchlistFilter = "";
+
+const sectorPerformance = [
+  { sector: "Technology", change: 1.42, breadth: "Strong" },
+  { sector: "Communication", change: 0.84, breadth: "Positive" },
+  { sector: "Financials", change: 0.31, breadth: "Mixed" },
+  { sector: "Healthcare", change: -0.18, breadth: "Mixed" },
+  { sector: "Consumer Discretionary", change: 0.67, breadth: "Positive" },
+  { sector: "Energy", change: -0.92, breadth: "Weak" },
+  { sector: "Industrials", change: 0.22, breadth: "Mixed" },
+  { sector: "Utilities", change: -0.35, breadth: "Defensive" }
+];
+
+const marketBreadth = { advancers: 318, decliners: 186, highs: 42, lows: 17 };
+
+const placeholderNews = {
+  market: [
+    { title: "Index futures steady ahead of Fed speakers", source: "Market desk", time: "Pre-market" },
+    { title: "Semiconductors lead early risk appetite", source: "Sector watch", time: "9:45 AM" },
+    { title: "Treasury yields hold near weekly range", source: "Rates desk", time: "10:15 AM" }
+  ],
+  company: [
+    { title: "NVDA supplier checks remain in focus", source: "Company feed", time: "Today" },
+    { title: "AAPL services growth preview before earnings", source: "Company feed", time: "Today" },
+    { title: "TSLA delivery expectations split analysts", source: "Company feed", time: "Today" }
+  ],
+  watchlist: [
+    { title: "SPY volume above 20-day average", source: "Watchlist alert", time: "Live placeholder" },
+    { title: "QQQ approaching prior high", source: "Watchlist alert", time: "Live placeholder" },
+    { title: "AAPL price alert placeholder armed", source: "Watchlist alert", time: "Live placeholder" }
+  ]
+};
+
+const economicEvents = [
+  { category: "Fed", title: "FOMC speaker window", date: "This week", impact: "High" },
+  { category: "CPI", title: "Consumer Price Index", date: "Next release", impact: "High" },
+  { category: "Jobs", title: "Nonfarm payrolls", date: "Friday", impact: "High" },
+  { category: "Earnings", title: "Mega-cap earnings week", date: "Upcoming", impact: "Medium" }
+];
+
+const optionsDashboardData = {
+  putCallRatio: 0.86,
+  highestIv: { ticker: "TSLA", value: "72% IV" },
+  highestVolume: { ticker: "NVDA", value: "124K contracts" },
+  unusualActivity: [
+    { ticker: "NVDA", contract: "CALL 150", expiry: "Weekly", volume: "42K", note: "Sweep placeholder" },
+    { ticker: "TSLA", contract: "PUT 250", expiry: "Monthly", volume: "31K", note: "Hedge placeholder" },
+    { ticker: "AAPL", contract: "CALL 230", expiry: "Monthly", volume: "22K", note: "Earnings placeholder" }
+  ]
+};
 
 const brokers = [
   { id: "robinhood", name: "Robinhood" },
@@ -78,6 +132,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNavigation();
   setupForms();
   setupButtons();
+  setupProfessionalWorkspaceControls();
 
   renderAll();
 
@@ -87,7 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchAiCommandCenter();
 
   setInterval(fetchQuotes, 30000);
-  setInterval(fetchPortfolio, 30000);
+  setInterval(fetchPortfolio, 60000);
   setInterval(fetchAiCommandCenter, 30000);
 });
 
@@ -232,6 +287,12 @@ function setupButtons() {
     });
   }
 
+  const refreshPortfolioBtn = document.getElementById("refreshPortfolioBtn");
+
+  if (refreshPortfolioBtn) {
+    refreshPortfolioBtn.addEventListener("click", fetchPortfolio);
+  }
+
   const connectPlaidBtn = document.getElementById("connectPlaidBtn");
 
   if (connectPlaidBtn) {
@@ -273,6 +334,26 @@ function setupButtons() {
   }
 }
 
+/* PROFESSIONAL WORKSPACE CONTROLS */
+
+function setupProfessionalWorkspaceControls() {
+  const searchInput = document.getElementById("advancedWatchlistSearch");
+
+  if (searchInput) {
+    searchInput.addEventListener("input", (event) => {
+      advancedWatchlistFilter = event.target.value || "";
+      renderAdvancedWatchlist();
+    });
+  }
+
+  document.querySelectorAll("[data-watchlist-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advancedWatchlistSort = button.dataset.watchlistSort || "symbol";
+      renderAdvancedWatchlist();
+    });
+  });
+}
+
 /* MAIN RENDER */
 
 function renderAll() {
@@ -289,6 +370,11 @@ function renderAll() {
   renderJournalEntries();
   renderGoal();
   renderAiCommandCenter();
+  renderMarketHeatMap();
+  renderAdvancedWatchlist();
+  renderNewsCenter();
+  renderEconomicCalendar();
+  renderOptionsDashboard();
 }
 
 /* BACKEND */
@@ -304,7 +390,7 @@ async function checkBackendHealth() {
     setBackendStatus("Live", true);
     setText("backendHealthStatus", "Backend is live.");
   } catch (error) {
-    console.error("Backend health check failed:", error);
+    console.warn("Backend health check unavailable:", error);
     setBackendStatus("Offline", false);
     setText("backendHealthStatus", "Backend is offline or blocked.");
   }
@@ -357,15 +443,17 @@ async function fetchQuotes() {
 
     renderQuoteGrid();
     renderWatchlistTable();
+    renderAdvancedWatchlist();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Quote fetch failed:", error);
+    console.warn("Quote fetch unavailable:", error);
 
     setBackendStatus("Offline", false);
     setText("quoteStatus", "Quotes failed");
 
     renderQuoteGrid();
     renderWatchlistTable();
+    renderAdvancedWatchlist();
   }
 }
 
@@ -403,16 +491,21 @@ function getQuotePercent(quote) {
 async function fetchPortfolio() {
   try {
     const response = await fetch(`${BACKEND_URL}/api/portfolio`);
+
+    if (!response.ok) {
+      throw new Error(`Portfolio request failed with ${response.status}`);
+    }
+
     const result = await response.json();
 
-    if (!result.success || !result.data) {
-      throw new Error("Portfolio response failed");
+    if (!result.success || !result.data || typeof result.data !== "object") {
+      throw new Error("Portfolio response missing success/data");
     }
 
     livePortfolio = result.data;
-
-    console.log("LIVE PORTFOLIO DATA:", livePortfolio);
-    console.log("LIVE HOLDINGS:", getLiveHoldings());
+    livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
+    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
+    portfolioLastSyncAt = new Date();
 
     setBackendStatus("Live", true);
 
@@ -420,9 +513,13 @@ async function fetchPortfolio() {
     renderAccountsList();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Portfolio fetch failed:", error);
+    console.warn("Portfolio fetch unavailable; keeping last data or mock fallback:", error);
 
-    livePortfolio = null;
+    portfolioFetchStatus = "offline";
+
+    if (!livePortfolio) {
+      livePortfolioSource = "mock";
+    }
 
     renderPortfolioSummary();
     renderAccountsList();
@@ -430,7 +527,57 @@ async function fetchPortfolio() {
   }
 }
 
-function getPortfolioValue(keyList, fallback = 0) {
+function normalizePortfolioSource(source) {
+  const normalized = String(source || "mock").trim().toLowerCase();
+
+  if (normalized === "robinhood") return "robinhood";
+
+  return "mock";
+}
+
+function getPortfolioSourceLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "robinhood/live";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "mock/mode";
+  }
+
+  return "offline";
+}
+
+function getPortfolioConnectionLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Robinhood Connected";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Mock Mode";
+  }
+
+  return "Offline";
+}
+
+function getPortfolioDataSourceLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Live Data Source: Robinhood";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Live Data Source: Mock";
+  }
+
+  return "Live Data Source: Offline";
+}
+
+function getLastSyncLabel() {
+  if (!portfolioLastSyncAt) return "Last sync: never";
+
+  return `Last sync: ${portfolioLastSyncAt.toLocaleTimeString()}`;
+}
+
+function getPortfolioValue(keyList, fallback = 0, useFallbackWhenLive = false) {
   if (!livePortfolio) return fallback;
 
   for (const key of keyList) {
@@ -439,7 +586,7 @@ function getPortfolioValue(keyList, fallback = 0) {
     }
   }
 
-  return fallback;
+  return useFallbackWhenLive ? fallback : 0;
 }
 
 function getLiveHoldings() {
@@ -451,29 +598,32 @@ function getLiveHoldings() {
     livePortfolio.securities ||
     livePortfolio.accounts?.[0]?.holdings ||
     livePortfolio.accounts?.[0]?.positions ||
+    livePortfolio.account?.holdings ||
+    livePortfolio.account?.positions ||
     []
   );
 }
 
 function renderPortfolioSummary() {
   const totalValue = getPortfolioValue(
-    ["total_value", "totalValue", "balance", "equity"],
+    ["total_value", "totalValue", "total", "balance", "equity", "account_value"],
     52341.87
   );
 
   const buyingPower = getPortfolioValue(
-    ["buying_power", "buyingPower"],
+    ["buying_power", "buyingPower", "available_buying_power"],
     3241.56
   );
 
   const cash = getPortfolioValue(
-    ["cash", "cash_balance"],
+    ["cash", "cash_balance", "cashBalance", "cash_available"],
     3241.56
   );
 
   const investedValue = getPortfolioValue(
-    ["invested_value", "investedValue"],
-    totalValue - cash
+    ["invested_value", "investedValue", "market_value", "marketValue"],
+    totalValue - cash,
+    true
   );
 
   const dayChange = getPortfolioValue(
@@ -494,8 +644,13 @@ function renderPortfolioSummary() {
   setText("dailyPL", formatCurrency(dayChange));
   setText("dailyPercent", formatPercent(dayChangePercent));
   setText("openPositions", holdings.length || livePortfolio?.open_positions || 4);
-  setText("accountCount", livePortfolio ? "1 account connected" : "0 accounts connected");
-  setText("portfolioSource", livePortfolio ? "live" : "demo");
+  const accountCount = safeArray(livePortfolio?.accounts).length || (livePortfolio?.account_number ? 1 : 0);
+
+  setText("accountCount", livePortfolioSource === "robinhood" ? `${accountCount || 1} account connected` : "mock fallback");
+  setText("portfolioSource", getPortfolioSourceLabel());
+  setText("portfolioConnectionStatus", getPortfolioConnectionLabel());
+  setText("portfolioLastSync", getLastSyncLabel());
+  setText("portfolioDataSource", getPortfolioDataSourceLabel());
 
   setClass("dailyPL", getChangeClass(dayChange));
   setClass("dailyPercent", getChangeClass(dayChange));
@@ -511,17 +666,17 @@ function renderAccountsList() {
   if (!accountsList) return;
 
   if (livePortfolio) {
-    const accountName = livePortfolio.account_name || "Robinhood";
-    const totalValue = getPortfolioValue(["total_value", "totalValue", "balance", "equity"]);
-    const buyingPower = getPortfolioValue(["buying_power", "buyingPower"]);
-    const cash = getPortfolioValue(["cash", "cash_balance"]);
+    const accountName = livePortfolio.account_name || livePortfolio.broker || (livePortfolioSource === "robinhood" ? "Robinhood" : "Mock Portfolio");
+    const totalValue = getPortfolioValue(["total_value", "totalValue", "total", "balance", "equity", "account_value"]);
+    const buyingPower = getPortfolioValue(["buying_power", "buyingPower", "available_buying_power"]);
+    const cash = getPortfolioValue(["cash", "cash_balance", "cashBalance", "cash_available"]);
 
     accountsList.innerHTML = `
       <article class="account-card">
         <h4>${accountName}</h4>
 
-        <span class="status-pill status-connected">
-          Connected
+        <span class="status-pill ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
+          ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "Connected" : getPortfolioConnectionLabel()}
         </span>
 
         <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
@@ -556,7 +711,8 @@ function renderBrokerCards() {
 
   brokerCards.innerHTML = brokers.map((broker) => {
     const connected =
-      livePortfolio &&
+      portfolioFetchStatus === "live" &&
+      livePortfolioSource === "robinhood" &&
       broker.id === "robinhood";
 
     return `
@@ -586,7 +742,7 @@ function connectBroker(accountId) {
 
   if (!broker) return;
 
-  if (broker.id === "robinhood" && livePortfolio) {
+  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     alert("Robinhood sync started.");
     return;
@@ -600,6 +756,101 @@ function showPlaidPlaceholder() {
 }
 
 /* HOLDINGS */
+
+function firstFiniteNumber(values, fallback = 0) {
+  for (const value of values) {
+    const number = Number(value);
+
+    if (Number.isFinite(number)) return number;
+  }
+
+  return fallback;
+}
+
+function normalizeHoldingRow(holding) {
+  if (!holding || typeof holding !== "object") return null;
+
+  const symbol = normalizeTicker(
+    holding.symbol ||
+    holding.ticker ||
+    holding.instrument ||
+    holding.name
+  );
+
+  const quantity = firstFiniteNumber([
+    holding.quantity,
+    holding.shares,
+    holding.qty,
+    holding.units
+  ]);
+
+  if (!symbol || quantity <= 0) return null;
+
+  const quote = quotes[symbol] || {};
+  const currentPrice = firstFiniteNumber([
+    holding.current_price,
+    holding.currentPrice,
+    holding.price,
+    holding.last_price,
+    holding.market_price,
+    getQuotePrice(quote)
+  ]);
+
+  const marketValue = firstFiniteNumber([
+    holding.market_value,
+    holding.marketValue,
+    holding.value,
+    holding.equity,
+    currentPrice ? quantity * currentPrice : undefined
+  ]);
+
+  if (marketValue <= 0 && currentPrice <= 0) return null;
+
+  const avgCost = firstFiniteNumber([
+    holding.average_cost,
+    holding.avg_cost,
+    holding.averageCost,
+    holding.average_buy_price,
+    holding.cost_basis_per_share
+  ]);
+
+  const todaysChange = firstFiniteNumber([
+    holding.day_change,
+    holding.dayChange,
+    holding.today_change,
+    holding.todayChange,
+    holding.change,
+    holding.price_change
+  ]);
+
+  const explicitTotalGainLoss = firstFiniteNumber([
+    holding.total_gain_loss,
+    holding.totalGainLoss,
+    holding.unrealized_pl,
+    holding.unrealizedPL,
+    holding.gain_loss,
+    holding.gainLoss
+  ], NaN);
+
+  const totalCost = quantity * avgCost;
+  const totalGainLoss = Number.isFinite(explicitTotalGainLoss)
+    ? explicitTotalGainLoss
+    : totalCost
+      ? marketValue - totalCost
+      : 0;
+
+  const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
+
+  return {
+    symbol,
+    quantity,
+    currentPrice,
+    marketValue,
+    todaysChange,
+    totalGainLoss,
+    totalGainLossPercent
+  };
+}
 
 function renderHoldingsTable() {
   const holdingsTable = document.getElementById("holdingsTable");
@@ -627,63 +878,31 @@ function renderHoldingsTable() {
     return;
   }
 
-  holdingsTable.innerHTML = holdings.map((holding) => {
-    const symbol = normalizeTicker(
-      holding.symbol ||
-      holding.ticker ||
-      holding.instrument ||
-      holding.name ||
-      "UNKNOWN"
-    );
+  const rows = holdings
+    .map(normalizeHoldingRow)
+    .filter(Boolean);
 
-    const quantity = Number(
-      holding.quantity ||
-      holding.shares ||
-      holding.qty ||
-      holding.units ||
-      0
-    );
+  if (!rows.length) {
+    holdingsTable.innerHTML = `
+      <p class="muted">
+        Holdings were received, but none had enough valid data to display.
+      </p>
+    `;
+    return;
+  }
 
-    const avgCost = Number(
-      holding.average_cost ||
-      holding.avg_cost ||
-      holding.average_buy_price ||
-      holding.cost_basis_per_share ||
-      0
-    );
-
-    const quote = quotes[symbol] || {};
-
-    const currentPrice = Number(
-      holding.current_price ||
-      holding.price ||
-      holding.last_price ||
-      holding.market_price ||
-      getQuotePrice(quote) ||
-      0
-    );
-
-    const marketValue = Number(
-      holding.market_value ||
-      holding.value ||
-      holding.equity ||
-      quantity * currentPrice ||
-      0
-    );
-
-    const totalCost = quantity * avgCost;
-    const totalPL = avgCost ? marketValue - totalCost : 0;
-    const totalPLPercent = totalCost ? (totalPL / totalCost) * 100 : 0;
-
+  holdingsTable.innerHTML = rows.map((holding) => {
     return `
       <div class="table-row">
-        <strong>${symbol}</strong>
-        <span>${quantity.toLocaleString()} shares</span>
-        <span>Avg: ${avgCost ? formatCurrency(avgCost) : "--"}</span>
-        <span>Current: ${currentPrice ? formatCurrency(currentPrice) : "--"}</span>
-        <span>Value: ${formatCurrency(marketValue)}</span>
-        <span class="${getChangeClass(totalPL)}">
-          ${formatCurrency(totalPL)} / ${formatPercent(totalPLPercent)}
+        <strong>${holding.symbol}</strong>
+        <span>${holding.quantity.toLocaleString()} shares</span>
+        <span>Current: ${holding.currentPrice ? formatCurrency(holding.currentPrice) : "--"}</span>
+        <span>Value: ${formatCurrency(holding.marketValue)}</span>
+        <span class="${getChangeClass(holding.todaysChange)}">
+          Today: ${formatCurrency(holding.todaysChange)}
+        </span>
+        <span class="${getChangeClass(holding.totalGainLoss)}">
+          Total: ${formatCurrency(holding.totalGainLoss)} / ${formatPercent(holding.totalGainLossPercent)}
         </span>
       </div>
     `;
@@ -777,6 +996,151 @@ function renderWatchlistTable() {
           ${formatCurrency(change)} / ${formatPercent(percent)}
         </span>
         <button onclick="removeTickerFromWatchlist('${ticker}')">Remove</button>
+      </div>
+    `;
+  }).join("");
+}
+
+/* PROFESSIONAL WORKSPACE */
+
+function formatCompactNumber(value) {
+  const number = Number(value) || 0;
+
+  if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
+  if (number >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
+
+  return number.toLocaleString();
+}
+
+function renderMarketHeatMap() {
+  const heatMap = document.getElementById("marketHeatMap");
+
+  if (heatMap) {
+    heatMap.innerHTML = sectorPerformance.map((item) => {
+      return `
+        <article class="heat-map-tile ${getChangeClass(item.change)}">
+          <strong>${item.sector}</strong>
+          <span>${formatPercent(item.change)}</span>
+          <small>${item.breadth} breadth</small>
+        </article>
+      `;
+    }).join("");
+  }
+
+  setText("marketAdvancers", marketBreadth.advancers);
+  setText("marketDecliners", marketBreadth.decliners);
+  setText("marketHighs", marketBreadth.highs);
+  setText("marketLows", marketBreadth.lows);
+}
+
+function getAdvancedWatchlistRows() {
+  const filter = advancedWatchlistFilter.trim().toUpperCase();
+
+  return watchlist
+    .filter((ticker) => !filter || ticker.includes(filter))
+    .map((ticker) => {
+      const quote = quotes[ticker] || {};
+      const price = getQuotePrice(quote);
+      const percent = getQuotePercent(quote);
+      const volume = Number(quote.volume || quote.regularMarketVolume || 0);
+      const marketCap = Number(quote.marketCap || quote.market_cap || 0);
+
+      return { ticker, price, percent, volume, marketCap };
+    })
+    .sort((a, b) => {
+      if (advancedWatchlistSort === "symbol") return a.ticker.localeCompare(b.ticker);
+      return Number(b[advancedWatchlistSort] || 0) - Number(a[advancedWatchlistSort] || 0);
+    });
+}
+
+function renderAdvancedWatchlist() {
+  const table = document.getElementById("advancedWatchlistTable");
+
+  if (!table) return;
+
+  const rows = getAdvancedWatchlistRows();
+
+  if (!rows.length) {
+    table.innerHTML = `<p class="muted">No symbols match the current watchlist filter.</p>`;
+    return;
+  }
+
+  table.innerHTML = rows.map((row) => {
+    return `
+      <div class="workspace-table-row advanced-watchlist-row">
+        <strong>${row.ticker}</strong>
+        <span>${row.price ? formatCurrency(row.price) : "Loading..."}</span>
+        <span class="${getChangeClass(row.percent)}">${formatPercent(row.percent)}</span>
+        <span>${row.volume ? formatCompactNumber(row.volume) : "API ready"}</span>
+        <span>${row.marketCap ? formatCompactNumber(row.marketCap) : "API ready"}</span>
+        <span title="Alert rules coming with live backend">🔔</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderNewsList(id, items) {
+  const feed = document.getElementById(id);
+
+  if (!feed) return;
+
+  if (!items.length) {
+    feed.innerHTML = `<p class="muted">No news available. API integration placeholder.</p>`;
+    return;
+  }
+
+  feed.innerHTML = items.map((item) => {
+    return `
+      <article class="news-item">
+        <strong>${item.title}</strong>
+        <small>${item.source} · ${item.time}</small>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderNewsCenter() {
+  renderNewsList("marketNewsFeed", placeholderNews.market);
+  renderNewsList("companyNewsFeed", placeholderNews.company);
+  renderNewsList("watchlistNewsFeed", placeholderNews.watchlist);
+}
+
+function renderEconomicCalendar() {
+  const calendar = document.getElementById("economicCalendarList");
+
+  if (!calendar) return;
+
+  calendar.innerHTML = economicEvents.map((event) => {
+    return `
+      <article class="timeline-item">
+        <span>${event.category}</span>
+        <strong>${event.title}</strong>
+        <small>${event.date} · ${event.impact} impact</small>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderOptionsDashboard() {
+  setText("putCallRatio", optionsDashboardData.putCallRatio.toFixed(2));
+  setText("highestIvTicker", optionsDashboardData.highestIv.ticker);
+  setText("highestIvValue", optionsDashboardData.highestIv.value);
+  setText("highestOptionVolumeTicker", optionsDashboardData.highestVolume.ticker);
+  setText("highestOptionVolumeValue", optionsDashboardData.highestVolume.value);
+
+  const table = document.getElementById("unusualOptionsTable");
+
+  if (!table) return;
+
+  table.innerHTML = optionsDashboardData.unusualActivity.map((item) => {
+    return `
+      <div class="workspace-table-row unusual-options-row">
+        <strong>${item.ticker}</strong>
+        <span>${item.contract}</span>
+        <span>${item.expiry}</span>
+        <span>${item.volume}</span>
+        <span>${item.note}</span>
       </div>
     `;
   }).join("");
@@ -1056,7 +1420,7 @@ async function fetchAiCommandCenter() {
     aiCommandCenter = result.data;
     renderAiCommandCenter();
   } catch (error) {
-    console.error("AI command center failed:", error);
+    console.warn("AI command center unavailable:", error);
     aiCommandCenter = null;
     renderAiCommandCenter();
   }
