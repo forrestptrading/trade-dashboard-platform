@@ -14,6 +14,7 @@ let watchlist = loadFromStorage(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
 let livePortfolio = null;
 let livePortfolioSource = "mock";
 let portfolioFetchStatus = "offline";
+let portfolioLastSyncAt = null;
 let aiCommandCenter = null;
 let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
 let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
@@ -89,7 +90,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchAiCommandCenter();
 
   setInterval(fetchQuotes, 30000);
-  setInterval(fetchPortfolio, 30000);
+  setInterval(fetchPortfolio, 60000);
   setInterval(fetchAiCommandCenter, 30000);
 });
 
@@ -232,6 +233,12 @@ function setupButtons() {
       fetchPortfolio();
       fetchAiCommandCenter();
     });
+  }
+
+  const refreshPortfolioBtn = document.getElementById("refreshPortfolioBtn");
+
+  if (refreshPortfolioBtn) {
+    refreshPortfolioBtn.addEventListener("click", fetchPortfolio);
   }
 
   const connectPlaidBtn = document.getElementById("connectPlaidBtn");
@@ -418,6 +425,8 @@ async function fetchPortfolio() {
 
     livePortfolio = result.data;
     livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
+    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
+    portfolioLastSyncAt = new Date();
     portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "offline";
 
     setBackendStatus("Live", true);
@@ -426,11 +435,13 @@ async function fetchPortfolio() {
     renderAccountsList();
     renderHoldingsTable();
   } catch (error) {
-    console.warn("Portfolio fetch unavailable; using mock fallback:", error);
+    console.warn("Portfolio fetch unavailable; keeping last data or mock fallback:", error);
 
-    livePortfolio = null;
-    livePortfolioSource = "mock";
     portfolioFetchStatus = "offline";
+
+    if (!livePortfolio) {
+      livePortfolioSource = "mock";
+    }
 
     renderPortfolioSummary();
     renderAccountsList();
@@ -447,10 +458,48 @@ function normalizePortfolioSource(source) {
 }
 
 function getPortfolioSourceLabel() {
-  return `${livePortfolioSource}/${portfolioFetchStatus}`;
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "robinhood/live";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "mock/mode";
+  }
+
+  return "offline";
 }
 
-function getPortfolioValue(keyList, fallback = 0) {
+function getPortfolioConnectionLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Robinhood Connected";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Mock Mode";
+  }
+
+  return "Offline";
+}
+
+function getPortfolioDataSourceLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Live Data Source: Robinhood";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Live Data Source: Mock";
+  }
+
+  return "Live Data Source: Offline";
+}
+
+function getLastSyncLabel() {
+  if (!portfolioLastSyncAt) return "Last sync: never";
+
+  return `Last sync: ${portfolioLastSyncAt.toLocaleTimeString()}`;
+}
+
+function getPortfolioValue(keyList, fallback = 0, useFallbackWhenLive = false) {
   if (!livePortfolio) return fallback;
 
   for (const key of keyList) {
@@ -459,7 +508,7 @@ function getPortfolioValue(keyList, fallback = 0) {
     }
   }
 
-  return fallback;
+  return useFallbackWhenLive ? fallback : 0;
 }
 
 function getLiveHoldings() {
@@ -495,7 +544,8 @@ function renderPortfolioSummary() {
 
   const investedValue = getPortfolioValue(
     ["invested_value", "investedValue", "market_value", "marketValue"],
-    totalValue - cash
+    totalValue - cash,
+    true
   );
 
   const dayChange = getPortfolioValue(
@@ -520,6 +570,9 @@ function renderPortfolioSummary() {
 
   setText("accountCount", livePortfolioSource === "robinhood" ? `${accountCount || 1} account connected` : "mock fallback");
   setText("portfolioSource", getPortfolioSourceLabel());
+  setText("portfolioConnectionStatus", getPortfolioConnectionLabel());
+  setText("portfolioLastSync", getLastSyncLabel());
+  setText("portfolioDataSource", getPortfolioDataSourceLabel());
 
   setClass("dailyPL", getChangeClass(dayChange));
   setClass("dailyPercent", getChangeClass(dayChange));
@@ -544,8 +597,8 @@ function renderAccountsList() {
       <article class="account-card">
         <h4>${accountName}</h4>
 
-        <span class="status-pill ${livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
-          ${livePortfolioSource === "robinhood" ? "Connected" : "Mock Fallback"}
+        <span class="status-pill ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
+          ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "Connected" : getPortfolioConnectionLabel()}
         </span>
 
         <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
@@ -580,6 +633,7 @@ function renderBrokerCards() {
 
   brokerCards.innerHTML = brokers.map((broker) => {
     const connected =
+      portfolioFetchStatus === "live" &&
       livePortfolioSource === "robinhood" &&
       broker.id === "robinhood";
 
@@ -610,7 +664,7 @@ function connectBroker(accountId) {
 
   if (!broker) return;
 
-  if (broker.id === "robinhood" && livePortfolioSource === "robinhood") {
+  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     alert("Robinhood sync started.");
     return;
@@ -624,6 +678,101 @@ function showPlaidPlaceholder() {
 }
 
 /* HOLDINGS */
+
+function firstFiniteNumber(values, fallback = 0) {
+  for (const value of values) {
+    const number = Number(value);
+
+    if (Number.isFinite(number)) return number;
+  }
+
+  return fallback;
+}
+
+function normalizeHoldingRow(holding) {
+  if (!holding || typeof holding !== "object") return null;
+
+  const symbol = normalizeTicker(
+    holding.symbol ||
+    holding.ticker ||
+    holding.instrument ||
+    holding.name
+  );
+
+  const quantity = firstFiniteNumber([
+    holding.quantity,
+    holding.shares,
+    holding.qty,
+    holding.units
+  ]);
+
+  if (!symbol || quantity <= 0) return null;
+
+  const quote = quotes[symbol] || {};
+  const currentPrice = firstFiniteNumber([
+    holding.current_price,
+    holding.currentPrice,
+    holding.price,
+    holding.last_price,
+    holding.market_price,
+    getQuotePrice(quote)
+  ]);
+
+  const marketValue = firstFiniteNumber([
+    holding.market_value,
+    holding.marketValue,
+    holding.value,
+    holding.equity,
+    currentPrice ? quantity * currentPrice : undefined
+  ]);
+
+  if (marketValue <= 0 && currentPrice <= 0) return null;
+
+  const avgCost = firstFiniteNumber([
+    holding.average_cost,
+    holding.avg_cost,
+    holding.averageCost,
+    holding.average_buy_price,
+    holding.cost_basis_per_share
+  ]);
+
+  const todaysChange = firstFiniteNumber([
+    holding.day_change,
+    holding.dayChange,
+    holding.today_change,
+    holding.todayChange,
+    holding.change,
+    holding.price_change
+  ]);
+
+  const explicitTotalGainLoss = firstFiniteNumber([
+    holding.total_gain_loss,
+    holding.totalGainLoss,
+    holding.unrealized_pl,
+    holding.unrealizedPL,
+    holding.gain_loss,
+    holding.gainLoss
+  ], NaN);
+
+  const totalCost = quantity * avgCost;
+  const totalGainLoss = Number.isFinite(explicitTotalGainLoss)
+    ? explicitTotalGainLoss
+    : totalCost
+      ? marketValue - totalCost
+      : 0;
+
+  const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
+
+  return {
+    symbol,
+    quantity,
+    currentPrice,
+    marketValue,
+    todaysChange,
+    totalGainLoss,
+    totalGainLossPercent
+  };
+}
 
 function renderHoldingsTable() {
   const holdingsTable = document.getElementById("holdingsTable");
@@ -651,63 +800,31 @@ function renderHoldingsTable() {
     return;
   }
 
-  holdingsTable.innerHTML = holdings.map((holding) => {
-    const symbol = normalizeTicker(
-      holding.symbol ||
-      holding.ticker ||
-      holding.instrument ||
-      holding.name ||
-      "UNKNOWN"
-    );
+  const rows = holdings
+    .map(normalizeHoldingRow)
+    .filter(Boolean);
 
-    const quantity = Number(
-      holding.quantity ||
-      holding.shares ||
-      holding.qty ||
-      holding.units ||
-      0
-    );
+  if (!rows.length) {
+    holdingsTable.innerHTML = `
+      <p class="muted">
+        Holdings were received, but none had enough valid data to display.
+      </p>
+    `;
+    return;
+  }
 
-    const avgCost = Number(
-      holding.average_cost ||
-      holding.avg_cost ||
-      holding.average_buy_price ||
-      holding.cost_basis_per_share ||
-      0
-    );
-
-    const quote = quotes[symbol] || {};
-
-    const currentPrice = Number(
-      holding.current_price ||
-      holding.price ||
-      holding.last_price ||
-      holding.market_price ||
-      getQuotePrice(quote) ||
-      0
-    );
-
-    const marketValue = Number(
-      holding.market_value ||
-      holding.value ||
-      holding.equity ||
-      quantity * currentPrice ||
-      0
-    );
-
-    const totalCost = quantity * avgCost;
-    const totalPL = avgCost ? marketValue - totalCost : 0;
-    const totalPLPercent = totalCost ? (totalPL / totalCost) * 100 : 0;
-
+  holdingsTable.innerHTML = rows.map((holding) => {
     return `
       <div class="table-row">
-        <strong>${symbol}</strong>
-        <span>${quantity.toLocaleString()} shares</span>
-        <span>Avg: ${avgCost ? formatCurrency(avgCost) : "--"}</span>
-        <span>Current: ${currentPrice ? formatCurrency(currentPrice) : "--"}</span>
-        <span>Value: ${formatCurrency(marketValue)}</span>
-        <span class="${getChangeClass(totalPL)}">
-          ${formatCurrency(totalPL)} / ${formatPercent(totalPLPercent)}
+        <strong>${holding.symbol}</strong>
+        <span>${holding.quantity.toLocaleString()} shares</span>
+        <span>Current: ${holding.currentPrice ? formatCurrency(holding.currentPrice) : "--"}</span>
+        <span>Value: ${formatCurrency(holding.marketValue)}</span>
+        <span class="${getChangeClass(holding.todaysChange)}">
+          Today: ${formatCurrency(holding.todaysChange)}
+        </span>
+        <span class="${getChangeClass(holding.totalGainLoss)}">
+          Total: ${formatCurrency(holding.totalGainLoss)} / ${formatPercent(holding.totalGainLossPercent)}
         </span>
       </div>
     `;

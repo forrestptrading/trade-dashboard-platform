@@ -47,6 +47,7 @@
         </div>
 
         <button id="refreshQuotesBtn">Refresh Data</button>
+        <button id="refreshPortfolioBtn">Refresh Portfolio</button>
       </header>
 
       <section id="overview" class="page-section active-section">
@@ -85,6 +86,13 @@
             <span>Open Positions</span>
             <strong id="openPositions">0</strong>
             <small id="accountCount">0 accounts connected</small>
+          </article>
+
+          <article class="summary-card">
+            <span>Connection Status</span>
+            <strong id="portfolioConnectionStatus">Offline</strong>
+            <small id="portfolioLastSync">Last sync: never</small>
+            <small id="portfolioDataSource">Source: mock</small>
           </article>
 
           <article class="summary-card">
