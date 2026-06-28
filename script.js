@@ -965,6 +965,7 @@ function connectBroker(accountId) {
 
   if (getBrokerConnection(broker.id)?.status === "connected") {
     fetchBrokerConnections();
+  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     setPlaidStatus(`${broker.name} account sync requested.`);
     return;
