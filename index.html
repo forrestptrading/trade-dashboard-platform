@@ -23,6 +23,10 @@
       <nav class="side-nav">
         <button class="nav-btn active" data-section="overview">Overview</button>
         <button class="nav-btn" data-section="watchlist">Watchlist</button>
+        <button class="nav-btn" data-section="marketWorkspace">Market</button>
+        <button class="nav-btn" data-section="newsCenter">News</button>
+        <button class="nav-btn" data-section="economicCalendar">Calendar</button>
+        <button class="nav-btn" data-section="optionsDashboard">Options Pro</button>
         <button class="nav-btn" data-section="accounts">Accounts</button>
         <button class="nav-btn" data-section="holdings">Holdings</button>
         <button class="nav-btn" data-section="options">Options</button>
@@ -169,6 +173,134 @@
           </div>
 
           <div id="watchlistTable" class="table-list"></div>
+        </section>
+
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Advanced Watchlist</h3>
+              <p>Sortable workspace ready for volume, market cap, and alert APIs.</p>
+            </div>
+
+            <input id="advancedWatchlistSearch" class="workspace-search" type="text" placeholder="Filter symbols" />
+          </div>
+
+          <div class="workspace-table-header advanced-watchlist-header">
+            <button data-watchlist-sort="symbol">Symbol</button>
+            <button data-watchlist-sort="price">Price</button>
+            <button data-watchlist-sort="percent">%</button>
+            <button data-watchlist-sort="volume">Volume</button>
+            <button data-watchlist-sort="marketCap">Market Cap</button>
+            <span>Alert</span>
+          </div>
+
+          <div id="advancedWatchlistTable" class="workspace-table"></div>
+        </section>
+      </section>
+
+      <section id="marketWorkspace" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Market Heat Map</h3>
+              <p>Sector performance and market breadth placeholders for future live APIs.</p>
+            </div>
+          </div>
+
+          <div id="marketHeatMap" class="heat-map-grid"></div>
+
+          <div class="workspace-grid compact-grid">
+            <article class="workspace-card">
+              <span>Advancers</span>
+              <strong id="marketAdvancers">--</strong>
+              <small>Market breadth placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>Decliners</span>
+              <strong id="marketDecliners">--</strong>
+              <small>Market breadth placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>New Highs</span>
+              <strong id="marketHighs">--</strong>
+              <small>52-week high placeholder</small>
+            </article>
+            <article class="workspace-card">
+              <span>New Lows</span>
+              <strong id="marketLows">--</strong>
+              <small>52-week low placeholder</small>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section id="newsCenter" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>News Center</h3>
+              <p>Market, company, and watchlist news placeholders with API-ready feeds.</p>
+            </div>
+          </div>
+
+          <div class="workspace-grid news-grid">
+            <article class="workspace-card">
+              <h4>Market News</h4>
+              <div id="marketNewsFeed" class="news-feed"></div>
+            </article>
+            <article class="workspace-card">
+              <h4>Company News</h4>
+              <div id="companyNewsFeed" class="news-feed"></div>
+            </article>
+            <article class="workspace-card">
+              <h4>Watchlist News</h4>
+              <div id="watchlistNewsFeed" class="news-feed"></div>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section id="economicCalendar" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Economic Calendar</h3>
+              <p>Upcoming macro and earnings events ready for economic data APIs.</p>
+            </div>
+          </div>
+
+          <div id="economicCalendarList" class="timeline-list"></div>
+        </section>
+      </section>
+
+      <section id="optionsDashboard" class="page-section">
+        <section class="panel pro-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Options Dashboard</h3>
+              <p>Unusual activity, IV, volume, and put/call placeholders for live backend data.</p>
+            </div>
+          </div>
+
+          <div class="workspace-grid compact-grid">
+            <article class="workspace-card">
+              <span>Put/Call Ratio</span>
+              <strong id="putCallRatio">--</strong>
+              <small>Live backend ready</small>
+            </article>
+            <article class="workspace-card">
+              <span>Highest IV</span>
+              <strong id="highestIvTicker">--</strong>
+              <small id="highestIvValue">Waiting for feed</small>
+            </article>
+            <article class="workspace-card">
+              <span>Highest Volume</span>
+              <strong id="highestOptionVolumeTicker">--</strong>
+              <small id="highestOptionVolumeValue">Waiting for feed</small>
+            </article>
+          </div>
+
+          <div id="unusualOptionsTable" class="workspace-table"></div>
         </section>
       </section>
 

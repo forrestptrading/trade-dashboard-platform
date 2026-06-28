@@ -19,6 +19,57 @@ let aiCommandCenter = null;
 let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
 let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
 let currentPendingIndex = 0;
+let advancedWatchlistSort = "symbol";
+let advancedWatchlistFilter = "";
+
+const sectorPerformance = [
+  { sector: "Technology", change: 1.42, breadth: "Strong" },
+  { sector: "Communication", change: 0.84, breadth: "Positive" },
+  { sector: "Financials", change: 0.31, breadth: "Mixed" },
+  { sector: "Healthcare", change: -0.18, breadth: "Mixed" },
+  { sector: "Consumer Discretionary", change: 0.67, breadth: "Positive" },
+  { sector: "Energy", change: -0.92, breadth: "Weak" },
+  { sector: "Industrials", change: 0.22, breadth: "Mixed" },
+  { sector: "Utilities", change: -0.35, breadth: "Defensive" }
+];
+
+const marketBreadth = { advancers: 318, decliners: 186, highs: 42, lows: 17 };
+
+const placeholderNews = {
+  market: [
+    { title: "Index futures steady ahead of Fed speakers", source: "Market desk", time: "Pre-market" },
+    { title: "Semiconductors lead early risk appetite", source: "Sector watch", time: "9:45 AM" },
+    { title: "Treasury yields hold near weekly range", source: "Rates desk", time: "10:15 AM" }
+  ],
+  company: [
+    { title: "NVDA supplier checks remain in focus", source: "Company feed", time: "Today" },
+    { title: "AAPL services growth preview before earnings", source: "Company feed", time: "Today" },
+    { title: "TSLA delivery expectations split analysts", source: "Company feed", time: "Today" }
+  ],
+  watchlist: [
+    { title: "SPY volume above 20-day average", source: "Watchlist alert", time: "Live placeholder" },
+    { title: "QQQ approaching prior high", source: "Watchlist alert", time: "Live placeholder" },
+    { title: "AAPL price alert placeholder armed", source: "Watchlist alert", time: "Live placeholder" }
+  ]
+};
+
+const economicEvents = [
+  { category: "Fed", title: "FOMC speaker window", date: "This week", impact: "High" },
+  { category: "CPI", title: "Consumer Price Index", date: "Next release", impact: "High" },
+  { category: "Jobs", title: "Nonfarm payrolls", date: "Friday", impact: "High" },
+  { category: "Earnings", title: "Mega-cap earnings week", date: "Upcoming", impact: "Medium" }
+];
+
+const optionsDashboardData = {
+  putCallRatio: 0.86,
+  highestIv: { ticker: "TSLA", value: "72% IV" },
+  highestVolume: { ticker: "NVDA", value: "124K contracts" },
+  unusualActivity: [
+    { ticker: "NVDA", contract: "CALL 150", expiry: "Weekly", volume: "42K", note: "Sweep placeholder" },
+    { ticker: "TSLA", contract: "PUT 250", expiry: "Monthly", volume: "31K", note: "Hedge placeholder" },
+    { ticker: "AAPL", contract: "CALL 230", expiry: "Monthly", volume: "22K", note: "Earnings placeholder" }
+  ]
+};
 
 const brokers = [
   { id: "robinhood", name: "Robinhood" },
@@ -81,6 +132,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNavigation();
   setupForms();
   setupButtons();
+  setupProfessionalWorkspaceControls();
 
   renderAll();
 
@@ -282,6 +334,26 @@ function setupButtons() {
   }
 }
 
+/* PROFESSIONAL WORKSPACE CONTROLS */
+
+function setupProfessionalWorkspaceControls() {
+  const searchInput = document.getElementById("advancedWatchlistSearch");
+
+  if (searchInput) {
+    searchInput.addEventListener("input", (event) => {
+      advancedWatchlistFilter = event.target.value || "";
+      renderAdvancedWatchlist();
+    });
+  }
+
+  document.querySelectorAll("[data-watchlist-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      advancedWatchlistSort = button.dataset.watchlistSort || "symbol";
+      renderAdvancedWatchlist();
+    });
+  });
+}
+
 /* MAIN RENDER */
 
 function renderAll() {
@@ -298,6 +370,11 @@ function renderAll() {
   renderJournalEntries();
   renderGoal();
   renderAiCommandCenter();
+  renderMarketHeatMap();
+  renderAdvancedWatchlist();
+  renderNewsCenter();
+  renderEconomicCalendar();
+  renderOptionsDashboard();
 }
 
 /* BACKEND */
@@ -366,6 +443,7 @@ async function fetchQuotes() {
 
     renderQuoteGrid();
     renderWatchlistTable();
+    renderAdvancedWatchlist();
     renderHoldingsTable();
   } catch (error) {
     console.warn("Quote fetch unavailable:", error);
@@ -375,6 +453,7 @@ async function fetchQuotes() {
 
     renderQuoteGrid();
     renderWatchlistTable();
+    renderAdvancedWatchlist();
   }
 }
 
@@ -427,7 +506,6 @@ async function fetchPortfolio() {
     livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
     portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
     portfolioLastSyncAt = new Date();
-    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "offline";
 
     setBackendStatus("Live", true);
 
@@ -918,6 +996,151 @@ function renderWatchlistTable() {
           ${formatCurrency(change)} / ${formatPercent(percent)}
         </span>
         <button onclick="removeTickerFromWatchlist('${ticker}')">Remove</button>
+      </div>
+    `;
+  }).join("");
+}
+
+/* PROFESSIONAL WORKSPACE */
+
+function formatCompactNumber(value) {
+  const number = Number(value) || 0;
+
+  if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
+  if (number >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
+
+  return number.toLocaleString();
+}
+
+function renderMarketHeatMap() {
+  const heatMap = document.getElementById("marketHeatMap");
+
+  if (heatMap) {
+    heatMap.innerHTML = sectorPerformance.map((item) => {
+      return `
+        <article class="heat-map-tile ${getChangeClass(item.change)}">
+          <strong>${item.sector}</strong>
+          <span>${formatPercent(item.change)}</span>
+          <small>${item.breadth} breadth</small>
+        </article>
+      `;
+    }).join("");
+  }
+
+  setText("marketAdvancers", marketBreadth.advancers);
+  setText("marketDecliners", marketBreadth.decliners);
+  setText("marketHighs", marketBreadth.highs);
+  setText("marketLows", marketBreadth.lows);
+}
+
+function getAdvancedWatchlistRows() {
+  const filter = advancedWatchlistFilter.trim().toUpperCase();
+
+  return watchlist
+    .filter((ticker) => !filter || ticker.includes(filter))
+    .map((ticker) => {
+      const quote = quotes[ticker] || {};
+      const price = getQuotePrice(quote);
+      const percent = getQuotePercent(quote);
+      const volume = Number(quote.volume || quote.regularMarketVolume || 0);
+      const marketCap = Number(quote.marketCap || quote.market_cap || 0);
+
+      return { ticker, price, percent, volume, marketCap };
+    })
+    .sort((a, b) => {
+      if (advancedWatchlistSort === "symbol") return a.ticker.localeCompare(b.ticker);
+      return Number(b[advancedWatchlistSort] || 0) - Number(a[advancedWatchlistSort] || 0);
+    });
+}
+
+function renderAdvancedWatchlist() {
+  const table = document.getElementById("advancedWatchlistTable");
+
+  if (!table) return;
+
+  const rows = getAdvancedWatchlistRows();
+
+  if (!rows.length) {
+    table.innerHTML = `<p class="muted">No symbols match the current watchlist filter.</p>`;
+    return;
+  }
+
+  table.innerHTML = rows.map((row) => {
+    return `
+      <div class="workspace-table-row advanced-watchlist-row">
+        <strong>${row.ticker}</strong>
+        <span>${row.price ? formatCurrency(row.price) : "Loading..."}</span>
+        <span class="${getChangeClass(row.percent)}">${formatPercent(row.percent)}</span>
+        <span>${row.volume ? formatCompactNumber(row.volume) : "API ready"}</span>
+        <span>${row.marketCap ? formatCompactNumber(row.marketCap) : "API ready"}</span>
+        <span title="Alert rules coming with live backend">🔔</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderNewsList(id, items) {
+  const feed = document.getElementById(id);
+
+  if (!feed) return;
+
+  if (!items.length) {
+    feed.innerHTML = `<p class="muted">No news available. API integration placeholder.</p>`;
+    return;
+  }
+
+  feed.innerHTML = items.map((item) => {
+    return `
+      <article class="news-item">
+        <strong>${item.title}</strong>
+        <small>${item.source} · ${item.time}</small>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderNewsCenter() {
+  renderNewsList("marketNewsFeed", placeholderNews.market);
+  renderNewsList("companyNewsFeed", placeholderNews.company);
+  renderNewsList("watchlistNewsFeed", placeholderNews.watchlist);
+}
+
+function renderEconomicCalendar() {
+  const calendar = document.getElementById("economicCalendarList");
+
+  if (!calendar) return;
+
+  calendar.innerHTML = economicEvents.map((event) => {
+    return `
+      <article class="timeline-item">
+        <span>${event.category}</span>
+        <strong>${event.title}</strong>
+        <small>${event.date} · ${event.impact} impact</small>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderOptionsDashboard() {
+  setText("putCallRatio", optionsDashboardData.putCallRatio.toFixed(2));
+  setText("highestIvTicker", optionsDashboardData.highestIv.ticker);
+  setText("highestIvValue", optionsDashboardData.highestIv.value);
+  setText("highestOptionVolumeTicker", optionsDashboardData.highestVolume.ticker);
+  setText("highestOptionVolumeValue", optionsDashboardData.highestVolume.value);
+
+  const table = document.getElementById("unusualOptionsTable");
+
+  if (!table) return;
+
+  table.innerHTML = optionsDashboardData.unusualActivity.map((item) => {
+    return `
+      <div class="workspace-table-row unusual-options-row">
+        <strong>${item.ticker}</strong>
+        <span>${item.contract}</span>
+        <span>${item.expiry}</span>
+        <span>${item.volume}</span>
+        <span>${item.note}</span>
       </div>
     `;
   }).join("");

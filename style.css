@@ -505,3 +505,142 @@ body {
 
 
 
+
+/* PROFESSIONAL WORKSPACE */
+
+.pro-panel {
+  margin-bottom: 20px;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(240px,1fr));
+  gap: 14px;
+}
+
+.compact-grid {
+  margin-top: 16px;
+}
+
+.workspace-card,
+.news-item,
+.timeline-item {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.workspace-card h4,
+.workspace-card span,
+.timeline-item span {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.workspace-card strong {
+  display: block;
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.workspace-card small,
+.news-item small,
+.timeline-item small {
+  display: block;
+  opacity: .65;
+  margin-top: 6px;
+}
+
+.workspace-search {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 220px;
+}
+
+.workspace-table,
+.news-feed,
+.timeline-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-table-header,
+.workspace-table-row {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+}
+
+.workspace-table-header {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  opacity: .72;
+}
+
+.workspace-table-header button {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.workspace-table-row {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.advanced-watchlist-header,
+.advanced-watchlist-row {
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr .5fr;
+}
+
+.unusual-options-row {
+  grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
+}
+
+.heat-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(170px,1fr));
+  gap: 12px;
+}
+
+.heat-map-tile {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  min-height: 110px;
+}
+
+.heat-map-tile strong,
+.heat-map-tile span,
+.heat-map-tile small {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.heat-map-tile span {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+@media (max-width: 900px) {
+  .advanced-watchlist-header,
+  .advanced-watchlist-row,
+  .unusual-options-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-search {
+    width: 100%;
+  }
+}
