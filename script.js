@@ -132,23 +132,35 @@ const pendingTrades = [
 ];
 
 document.addEventListener("DOMContentLoaded", () => {
-  setupNavigation();
-  setupForms();
-  setupButtons();
-  setupProfessionalWorkspaceControls();
+  runSafely("navigation setup", setupNavigation);
+  runSafely("form setup", setupForms);
+  runSafely("button setup", setupButtons);
+  runSafely("professional workspace setup", setupProfessionalWorkspaceControls);
 
-  renderAll();
+  runSafely("initial render", renderAll);
 
-  checkBackendHealth();
-  fetchQuotes();
-  fetchPortfolio();
-  fetchBrokerConnections();
-  fetchAiCommandCenter();
+  runSafely("backend health", checkBackendHealth);
+  runSafely("quotes fetch", fetchQuotes);
+  runSafely("portfolio fetch", fetchPortfolio);
+  runSafely("broker connections fetch", fetchBrokerConnections);
+  runSafely("AI command center fetch", fetchAiCommandCenter);
 
-  setInterval(fetchQuotes, 30000);
-  setInterval(fetchPortfolio, 60000);
-  setInterval(fetchAiCommandCenter, 30000);
+  setInterval(() => runSafely("quotes interval", fetchQuotes), 30000);
+  setInterval(() => runSafely("portfolio interval", fetchPortfolio), 60000);
+  setInterval(() => runSafely("AI command center interval", fetchAiCommandCenter), 30000);
 });
+
+function runSafely(label, callback) {
+  try {
+    const result = callback();
+
+    if (result && typeof result.catch === "function") {
+      result.catch((error) => console.warn(`${label} failed:`, error));
+    }
+  } catch (error) {
+    console.warn(`${label} failed:`, error);
+  }
+}
 
 /* STORAGE */
 
@@ -362,7 +374,7 @@ function setupProfessionalWorkspaceControls() {
 
 function renderAll() {
   renderPortfolioSummary();
-  renderQuoteGrid();
+  renderWatchlistCards();
   renderWatchlistTable();
   renderAccountsList();
   renderBrokerCards();
@@ -965,7 +977,6 @@ function connectBroker(accountId) {
 
   if (getBrokerConnection(broker.id)?.status === "connected") {
     fetchBrokerConnections();
-  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     setPlaidStatus(`${broker.name} account sync requested.`);
     return;
@@ -1156,6 +1167,10 @@ function removeTickerFromWatchlist(ticker) {
   renderQuoteGrid();
   renderWatchlistTable();
   fetchQuotes();
+}
+
+function renderWatchlistCards() {
+  renderQuoteGrid();
 }
 
 function renderQuoteGrid() {
