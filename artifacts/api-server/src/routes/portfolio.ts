@@ -6,6 +6,7 @@ import {
   type BrokerHolding,
 } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
+import { connectedBrokerPortfolio } from "../services/brokerConnectionsStore.js";
 
 const router: IRouter = Router();
 
@@ -218,6 +219,25 @@ router.get("/portfolio", async (req, res) => {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn({ err: msg }, "[portfolio] live fetch failed; falling back to mock");
     }
+  }
+
+  const connectedPortfolio = connectedBrokerPortfolio();
+  if (connectedPortfolio) {
+    logger.info("[portfolio] responding with connected broker demo portfolio data");
+    res.json({
+      success: true,
+      source: "mock" as const,
+      data: {
+        ...MOCK_PORTFOLIO,
+        ...connectedPortfolio,
+        day_change: 0,
+        day_change_percent: 0,
+        total_return: 0,
+        total_return_percent: 0,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    return;
   }
 
   logger.info("[portfolio] responding with mock portfolio data");

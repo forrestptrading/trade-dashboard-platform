@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
 
 /**
@@ -142,6 +142,66 @@ export interface AppNotification {
 }
 
 // ---------------------------------------------------------------------------
+// Broker connections
+// ---------------------------------------------------------------------------
+
+export type BrokerProvider = "robinhood" | "sofi" | "webull" | "schwab" | "fidelity";
+export type BrokerConnectionStatus = "connected" | "disconnected" | "syncing" | "error";
+export type BrokerAccountType = "brokerage" | "retirement" | "crypto";
+
+export interface BrokerConnectionHolding {
+  symbol: string;
+  quantity: number;
+  average_cost?: number;
+  current_price?: number;
+  market_value: number;
+  account_name: string;
+}
+
+export interface BrokerConnection {
+  id: string;
+  name: string;
+  provider: BrokerProvider;
+  status: BrokerConnectionStatus;
+  account_type: BrokerAccountType;
+  last_connected: string | null;
+  balance: number;
+  buying_power: number;
+  holdings: BrokerConnectionHolding[];
+}
+
+export interface BrokerConnectionsResponse {
+  success: boolean;
+  source: "memory";
+  count: number;
+  data: BrokerConnection[];
+}
+
+export interface BrokerConnectionResponse {
+  success: boolean;
+  source: "memory";
+  data: BrokerConnection;
+}
+
+export interface PlaidLinkTokenResponse {
+  success: boolean;
+  configured: boolean;
+  link_token: string | null;
+  message?: string;
+  expiration?: string;
+  request_id?: string;
+}
+
+export interface PlaidExchangeResponse {
+  success: boolean;
+  configured: boolean;
+  source: "memory";
+  message?: string;
+  request_id?: string;
+  data: BrokerConnection;
+}
+
+// ---------------------------------------------------------------------------
 // Fetch functions (required by Sprint 4)
 // ---------------------------------------------------------------------------
 
@@ -186,6 +246,49 @@ export async function fetchNotifications(): Promise<ApiEnvelope<AppNotification[
   });
 }
 
+export async function fetchBrokerConnections(): Promise<BrokerConnectionsResponse> {
+  return customFetch<BrokerConnectionsResponse>(`/api/broker-connections`, {
+    method: "GET",
+    responseType: "json",
+  });
+}
+
+export async function createBrokerConnection(
+  provider: BrokerProvider,
+): Promise<BrokerConnectionResponse> {
+  return customFetch<BrokerConnectionResponse>(`/api/broker-connections`, {
+    method: "POST",
+    responseType: "json",
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export async function deleteBrokerConnection(id: string): Promise<{ success: boolean; source: "memory"; id: string }> {
+  return customFetch<{ success: boolean; source: "memory"; id: string }>(`/api/broker-connections/${id}`, {
+    method: "DELETE",
+    responseType: "json",
+  });
+}
+
+export async function createPlaidLinkToken(provider: BrokerProvider): Promise<PlaidLinkTokenResponse> {
+  return customFetch<PlaidLinkTokenResponse>(`/api/plaid/create-link-token`, {
+    method: "POST",
+    responseType: "json",
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export async function exchangePlaidPublicToken(input: {
+  provider: BrokerProvider;
+  public_token: string;
+}): Promise<PlaidExchangeResponse> {
+  return customFetch<PlaidExchangeResponse>(`/api/plaid/exchange-public-token`, {
+    method: "POST",
+    responseType: "json",
+    body: JSON.stringify(input),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Thin React Query hooks used by the dashboard
 // ---------------------------------------------------------------------------
@@ -222,5 +325,24 @@ export function useNotifications() {
   return useQuery({
     queryKey: [CACHE_VERSION, "/api/notifications"],
     queryFn: () => fetchNotifications(),
+  });
+}
+
+export function useBrokerConnections() {
+  return useQuery({
+    queryKey: [CACHE_VERSION, "/api/broker-connections"],
+    queryFn: () => fetchBrokerConnections(),
+  });
+}
+
+export function useCreateBrokerConnection() {
+  return useMutation({
+    mutationFn: createBrokerConnection,
+  });
+}
+
+export function useDeleteBrokerConnection() {
+  return useMutation({
+    mutationFn: deleteBrokerConnection,
   });
 }
