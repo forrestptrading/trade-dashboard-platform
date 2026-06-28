@@ -644,3 +644,13 @@ body {
     width: 100%;
   }
 }
+
+.plaid-status {
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.broker-card button:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}

@@ -21,6 +21,9 @@ let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
 let currentPendingIndex = 0;
 let advancedWatchlistSort = "symbol";
 let advancedWatchlistFilter = "";
+let brokerConnections = [];
+let plaidMessage = "Plaid Link is ready.";
+let plaidBusyProvider = null;
 
 const sectorPerformance = [
   { sector: "Technology", change: 1.42, breadth: "Strong" },
@@ -139,6 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkBackendHealth();
   fetchQuotes();
   fetchPortfolio();
+  fetchBrokerConnections();
   fetchAiCommandCenter();
 
   setInterval(fetchQuotes, 30000);
@@ -296,7 +300,7 @@ function setupButtons() {
   const connectPlaidBtn = document.getElementById("connectPlaidBtn");
 
   if (connectPlaidBtn) {
-    connectPlaidBtn.addEventListener("click", showPlaidPlaceholder);
+    connectPlaidBtn.addEventListener("click", () => connectBroker("robinhood"));
   }
 
   const approveTradeBtn = document.getElementById("approveTradeBtn");
@@ -362,6 +366,7 @@ function renderAll() {
   renderWatchlistTable();
   renderAccountsList();
   renderBrokerCards();
+  renderPlaidStatus();
   renderHoldingsTable();
   renderOptions();
   renderRiskAnalysis();
@@ -658,12 +663,222 @@ function renderPortfolioSummary() {
   setText("investedValue", formatCurrency(investedValue));
 }
 
+/* PLAID / BROKER CONNECTIONS */
+
+async function apiFetchJson(path, options = {}) {
+  const response = await fetch(`${BACKEND_URL}${path}`, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options
+  });
+
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok || !result) {
+    throw new Error(result?.error || `Request failed with ${response.status}`);
+  }
+
+  return result;
+}
+
+function getBrokerConnection(provider) {
+  return brokerConnections.find((connection) => connection.provider === provider);
+}
+
+function formatConnectionSync(value) {
+  if (!value) return "Last Sync: never";
+
+  return `Last Sync: ${new Date(value).toLocaleString()}`;
+}
+
+function setPlaidStatus(message, isError = false) {
+  plaidMessage = message;
+
+  const statusBox = document.getElementById("plaidStatusMessage");
+  if (!statusBox) return;
+
+  statusBox.textContent = message;
+  statusBox.className = `plaid-status ${isError ? "negative" : "muted"}`;
+}
+
+function renderPlaidStatus() {
+  setPlaidStatus(plaidMessage, plaidMessage.toLowerCase().includes("failed") || plaidMessage.toLowerCase().includes("unavailable"));
+}
+
+async function fetchBrokerConnections() {
+  try {
+    const result = await apiFetchJson("/api/broker-connections");
+
+    brokerConnections = safeArray(result.data);
+    renderAccountsList();
+    renderBrokerCards();
+    renderPlaidStatus();
+  } catch (error) {
+    console.warn("Broker connections unavailable:", error);
+    setPlaidStatus("Broker connections are unavailable. Portfolio fallback remains active.", true);
+  }
+}
+
+async function createBrokerConnection(provider) {
+  const result = await apiFetchJson("/api/broker-connections", {
+    method: "POST",
+    body: JSON.stringify({ provider })
+  });
+
+  return result.data;
+}
+
+async function createPlaidLinkToken(provider) {
+  return apiFetchJson("/api/plaid/create-link-token", {
+    method: "POST",
+    body: JSON.stringify({ provider })
+  });
+}
+
+async function exchangePlaidPublicToken(provider, publicToken) {
+  return apiFetchJson("/api/plaid/exchange-public-token", {
+    method: "POST",
+    body: JSON.stringify({ provider, public_token: publicToken })
+  });
+}
+
+function loadPlaidSdk() {
+  if (window.Plaid) return Promise.resolve(true);
+
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]');
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(true), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Plaid Link failed to load")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => reject(new Error("Plaid Link failed to load"));
+    document.body.appendChild(script);
+  });
+}
+
+function getPlaidExitMessage(error) {
+  const code = error?.error_code || error?.errorCode || "";
+
+  if (code.includes("INVALID_LINK_TOKEN")) {
+    return "Plaid Link token expired. Please try connecting again.";
+  }
+
+  if (code.includes("INSTITUTION") || code.includes("ITEM_LOGIN_REQUIRED")) {
+    return "Plaid institution is unavailable. Please try again later.";
+  }
+
+  return "Plaid Link was closed before connecting.";
+}
+
+async function handlePlaidSuccess(provider, publicToken) {
+  try {
+    await exchangePlaidPublicToken(provider, publicToken);
+    await fetchBrokerConnections();
+    await fetchPortfolio();
+    setPlaidStatus("Connected. Portfolio and broker connections refreshed.");
+  } catch (error) {
+    console.warn("Plaid public token exchange failed:", error);
+    setPlaidStatus("Plaid public token exchange failed. Please reconnect.", true);
+  } finally {
+    plaidBusyProvider = null;
+    renderBrokerCards();
+  }
+}
+
+async function connectWithPlaid(provider) {
+  if (plaidBusyProvider) {
+    setPlaidStatus("Plaid Link is already opening. Please finish or close the current session.");
+    return;
+  }
+
+  plaidBusyProvider = provider;
+  setPlaidStatus("Requesting Plaid Link token...");
+  renderBrokerCards();
+
+  try {
+    const tokenResponse = await createPlaidLinkToken(provider);
+
+    if (!tokenResponse.configured || !tokenResponse.link_token) {
+      setPlaidStatus(tokenResponse.message || "Plaid is not configured. Creating a demo broker connection.");
+      await createBrokerConnection(provider);
+      await fetchBrokerConnections();
+      await fetchPortfolio();
+      plaidBusyProvider = null;
+      setPlaidStatus("Demo broker connection created. Portfolio refreshed.");
+      renderBrokerCards();
+      return;
+    }
+
+    await loadPlaidSdk();
+
+    if (!window.Plaid) {
+      throw new Error("Plaid Link SDK unavailable");
+    }
+
+    const handler = window.Plaid.create({
+      token: tokenResponse.link_token,
+      onSuccess: (publicToken) => handlePlaidSuccess(provider, publicToken),
+      onExit: (error) => {
+        plaidBusyProvider = null;
+        setPlaidStatus(getPlaidExitMessage(error), Boolean(error));
+        renderBrokerCards();
+      }
+    });
+
+    handler.open();
+  } catch (error) {
+    console.warn("Plaid connection failed:", error);
+    plaidBusyProvider = null;
+    setPlaidStatus("Plaid backend or Link SDK is unavailable. Please try again later.", true);
+    renderBrokerCards();
+  }
+}
+
 /* ACCOUNTS */
 
 function renderAccountsList() {
   const accountsList = document.getElementById("accountsList");
 
   if (!accountsList) return;
+
+  if (brokerConnections.length) {
+    const connected = brokerConnections.filter((connection) => connection.status === "connected");
+    const totalBalance = connected.reduce((sum, connection) => sum + Number(connection.balance || 0), 0);
+    const totalBuyingPower = connected.reduce((sum, connection) => sum + Number(connection.buying_power || 0), 0);
+
+    accountsList.innerHTML = `
+      <article class="account-card">
+        <h4>Connected Accounts</h4>
+        <span class="status-pill status-connected">Connected</span>
+        <p>Account Count: <strong>${connected.length}</strong></p>
+        <p>Balance: <strong>${formatCurrency(totalBalance)}</strong></p>
+        <p>Buying Power: <strong>${formatCurrency(totalBuyingPower)}</strong></p>
+      </article>
+      ${brokerConnections.map((connection) => {
+        return `
+          <article class="account-card">
+            <h4>${connection.name}</h4>
+            <span class="status-pill ${connection.status === "connected" ? "status-connected" : "status-coming"}">
+              ${connection.status === "connected" ? "Connected" : connection.status}
+            </span>
+            <p>Institution Name: <strong>${connection.name}</strong></p>
+            <p>Account Count: <strong>1</strong></p>
+            <p>${formatConnectionSync(connection.last_connected)}</p>
+            <p>Balance: <strong>${formatCurrency(connection.balance)}</strong></p>
+            <p>Buying Power: <strong>${formatCurrency(connection.buying_power)}</strong></p>
+          </article>
+        `;
+      }).join("")}
+    `;
+
+    return;
+  }
 
   if (livePortfolio) {
     const accountName = livePortfolio.account_name || livePortfolio.broker || (livePortfolioSource === "robinhood" ? "Robinhood" : "Mock Portfolio");
@@ -679,6 +894,8 @@ function renderAccountsList() {
           ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "Connected" : getPortfolioConnectionLabel()}
         </span>
 
+        <p>Institution Name: <strong>${accountName}</strong></p>
+        <p>Account Count: <strong>${livePortfolio?.account_number ? 1 : 0}</strong></p>
         <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
         <p>Buying Power: <strong>${formatCurrency(buyingPower)}</strong></p>
         <p>Cash: <strong>${formatCurrency(cash)}</strong></p>
@@ -697,6 +914,8 @@ function renderAccountsList() {
           Not Connected
         </span>
 
+        <p>Institution Name: <strong>${broker.name}</strong></p>
+        <p>Account Count: <strong>0</strong></p>
         <p>Balance: <strong>$0.00</strong></p>
         <p>Buying Power: <strong>$0.00</strong></p>
       </article>
@@ -710,27 +929,29 @@ function renderBrokerCards() {
   if (!brokerCards) return;
 
   brokerCards.innerHTML = brokers.map((broker) => {
+    const connection = getBrokerConnection(broker.id);
     const connected =
-      portfolioFetchStatus === "live" &&
-      livePortfolioSource === "robinhood" &&
-      broker.id === "robinhood";
+      connection?.status === "connected" ||
+      (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" && broker.id === "robinhood");
+    const isBusy = plaidBusyProvider === broker.id;
 
     return `
       <article class="broker-card">
-        <h4>${broker.name}</h4>
+        <h4>${connection?.name || broker.name}</h4>
 
-        <span class="status-pill ${
-          connected ? "status-connected" : "status-coming"
-        }">
-          ${connected ? "Connected" : "Plaid Ready"}
+        <span class="status-pill ${connected ? "status-connected" : isBusy ? "status-coming" : "status-coming"}">
+          ${connected ? "Connected" : isBusy ? "Connecting..." : "Plaid Ready"}
         </span>
 
+        <p>Institution Name: <strong>${connection?.name || broker.name}</strong></p>
+        <p>Account Count: <strong>${connection ? 1 : 0}</strong></p>
+        <p class="muted">${formatConnectionSync(connection?.last_connected)}</p>
         <p class="muted">
-          Secure account linking will run through Plaid Link.
+          Secure account linking runs through Plaid Link.
         </p>
 
-        <button onclick="connectBroker('${broker.id}')">
-          ${connected ? "Sync Account" : "Connect"}
+        <button onclick="connectBroker('${broker.id}')" ${isBusy ? "disabled" : ""}>
+          ${connected ? "Sync Account" : isBusy ? "Connecting..." : "Connect"}
         </button>
       </article>
     `;
@@ -742,17 +963,21 @@ function connectBroker(accountId) {
 
   if (!broker) return;
 
+  if (getBrokerConnection(broker.id)?.status === "connected") {
+    fetchBrokerConnections();
   if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
-    alert("Robinhood sync started.");
+    setPlaidStatus(`${broker.name} account sync requested.`);
     return;
   }
 
-  alert(`${broker.name} connection is ready for the Plaid backend step.`);
-}
+  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    fetchPortfolio();
+    setPlaidStatus("Robinhood sync started.");
+    return;
+  }
 
-function showPlaidPlaceholder() {
-  alert("Plaid Link comes next. This button will open the secure account sign-in window.");
+  connectWithPlaid(broker.id);
 }
 
 /* HOLDINGS */
