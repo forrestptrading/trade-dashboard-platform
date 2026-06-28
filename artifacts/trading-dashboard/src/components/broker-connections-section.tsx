@@ -56,7 +56,12 @@ export function BrokerConnectionsSection() {
   const connect = useCreateBrokerConnection();
   const disconnect = useDeleteBrokerConnection();
   const [message, setMessage] = useState<string | null>(null);
+  const [demoProvider, setDemoProvider] = useState<BrokerProvider | null>(null);
   const connections = data?.data ?? [];
+  const connectedAccounts = connections.filter((connection) => connection.status === "connected");
+  const connectedBalance = connectedAccounts.reduce((sum, connection) => sum + connection.balance, 0);
+  const connectedBuyingPower = connectedAccounts.reduce((sum, connection) => sum + connection.buying_power, 0);
+  const connectedHoldings = connectedAccounts.reduce((sum, connection) => sum + connection.holdings.length, 0);
 
   const refreshPortfolioData = async () => {
     await Promise.all([
@@ -93,20 +98,33 @@ export function BrokerConnectionsSection() {
     await connect.mutateAsync(provider);
     await refetch();
     await refreshPortfolioData();
+    setDemoProvider(null);
+    setMessage(null);
   };
 
   const handleConnect = async (provider: BrokerProvider) => {
     setMessage(null);
-    const tokenResponse = await createPlaidLinkToken(provider);
+    setDemoProvider(null);
+
+    let tokenResponse: Awaited<ReturnType<typeof createPlaidLinkToken>>;
+    try {
+      tokenResponse = await createPlaidLinkToken(provider);
+    } catch {
+      setMessage("Plaid is not configured yet. Demo connection is available.");
+      setDemoProvider(provider);
+      return;
+    }
 
     if (!tokenResponse.configured || !tokenResponse.link_token) {
       setMessage(tokenResponse.message ?? "Plaid is not configured yet. Demo connection is available.");
+      setDemoProvider(provider);
       return;
     }
 
     const plaidAvailable = await loadPlaid().catch(() => false);
     if (!plaidAvailable || !window.Plaid) {
       setMessage("Plaid is not configured yet. Demo connection is available.");
+      setDemoProvider(provider);
       return;
     }
 
@@ -119,6 +137,7 @@ export function BrokerConnectionsSection() {
       },
       onExit: () => {
         setMessage("Plaid Link was closed. Demo connection is available.");
+        setDemoProvider(provider);
       },
     });
 
@@ -158,10 +177,47 @@ export function BrokerConnectionsSection() {
       </div>
 
       {message && (
-        <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300">
-          {message}
+        <div className="flex flex-col gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 sm:flex-row sm:items-center sm:justify-between">
+          <span>{message}</span>
+          {demoProvider && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => connectDemo(demoProvider)}
+              disabled={connect.isPending || isFetching}
+              className="border-yellow-500/40 font-mono text-xs uppercase text-yellow-200"
+            >
+              Demo Connect
+            </Button>
+          )}
         </div>
       )}
+
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+            Connected Accounts
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div>
+            <p className="text-xs font-mono text-muted-foreground uppercase">Connected</p>
+            <p className="text-2xl font-mono tabular-nums">{connectedAccounts.length}</p>
+          </div>
+          <div>
+            <p className="text-xs font-mono text-muted-foreground uppercase">Balance</p>
+            <p className="text-2xl font-mono tabular-nums">{formatCurrency(connectedBalance)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-mono text-muted-foreground uppercase">Buying Power</p>
+            <p className="text-2xl font-mono tabular-nums">{formatCurrency(connectedBuyingPower)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-mono text-muted-foreground uppercase">Holdings</p>
+            <p className="text-2xl font-mono tabular-nums">{connectedHoldings}</p>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
         {BROKERS.map((broker) => {
