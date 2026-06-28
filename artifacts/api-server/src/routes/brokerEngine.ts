@@ -12,6 +12,10 @@ import {
   type SkippedBrokerStatus,
 } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
+import {
+  connectedBrokerConnections,
+  type BrokerConnectionRecord,
+} from "../services/brokerConnectionsStore.js";
 
 const router: IRouter = Router();
 
@@ -93,6 +97,133 @@ function unavailableSnapshot(
   };
 }
 
+function mockRobinhoodSnapshot(): NormalizedBrokerSnapshot {
+  const now = new Date().toISOString();
+  const holdings = [
+    {
+      brokerId: "robinhood" as const,
+      accountName: "Robinhood Mock",
+      symbol: "AAPL",
+      quantity: 10,
+      marketValue: money(2978.9),
+      assetType: "equity" as const,
+    },
+    {
+      brokerId: "robinhood" as const,
+      accountName: "Robinhood Mock",
+      symbol: "NVDA",
+      quantity: 15,
+      marketValue: money(3153),
+      assetType: "equity" as const,
+    },
+    {
+      brokerId: "robinhood" as const,
+      accountName: "Robinhood Mock",
+      symbol: "TSLA",
+      quantity: 8,
+      marketValue: money(3204),
+      assetType: "equity" as const,
+    },
+    {
+      brokerId: "robinhood" as const,
+      accountName: "Robinhood Mock",
+      symbol: "SPY",
+      quantity: 5,
+      marketValue: money(3732.85),
+      assetType: "equity" as const,
+    },
+  ];
+
+  return {
+    brokerId: "robinhood",
+    source: "mock",
+    accountSummary: {
+      brokerId: "robinhood",
+      accountId: "robinhood-mock",
+      accountNumber: "MOCK-12345678",
+      accountName: "Robinhood Mock",
+      institutionName: "Robinhood",
+      accountType: "unknown",
+      totalValue: money(999999.99),
+      cash: money(77777.77),
+      buyingPower: money(88888.88),
+      investedValue: money(49100.31),
+      dayChange: money(6666.66),
+      dayChangePercent: 12.34,
+      totalReturn: money(7241.87),
+      totalReturnPercent: 16.07,
+      updatedAt: now,
+    },
+    cash: money(77777.77),
+    buyingPower: money(88888.88),
+    holdings,
+    options: [],
+    transactions: [],
+    dividends: [],
+    orders: [],
+    syncStatus: {
+      brokerId: "robinhood",
+      state: "mock",
+      lastSyncAt: now,
+      message: "Live broker data is disabled; included mock Robinhood snapshot.",
+    },
+  };
+}
+
+function connectionSnapshot(connection: BrokerConnectionRecord): NormalizedBrokerSnapshot {
+  const provider = connection.provider as BrokerProviderId;
+  const now = connection.last_connected ?? new Date().toISOString();
+  const investedValue = connection.holdings.reduce(
+    (sum, holding) => sum + Number(holding.market_value || 0),
+    0,
+  );
+  const holdings = connection.holdings.map((holding) => ({
+    brokerId: provider,
+    accountId: connection.id,
+    accountName: connection.name,
+    symbol: holding.symbol,
+    quantity: Number(holding.quantity || 0),
+    ...(holding.average_cost !== undefined ? { averageCost: money(holding.average_cost) } : {}),
+    ...(holding.current_price !== undefined ? { currentPrice: money(holding.current_price) } : {}),
+    marketValue: money(holding.market_value),
+    assetType: "equity" as const,
+  }));
+
+  return {
+    brokerId: provider,
+    source: provider,
+    accountSummary: {
+      brokerId: provider,
+      accountId: connection.id,
+      accountName: connection.name,
+      institutionName: connection.name,
+      accountType: "unknown",
+      totalValue: money(connection.balance),
+      cash: money(connection.buying_power),
+      buyingPower: money(connection.buying_power),
+      investedValue: money(investedValue),
+      dayChange: money(),
+      dayChangePercent: 0,
+      totalReturn: money(),
+      totalReturnPercent: 0,
+      updatedAt: now,
+    },
+    cash: money(connection.buying_power),
+    buyingPower: money(connection.buying_power),
+    holdings,
+    options: [],
+    transactions: [],
+    dividends: [],
+    orders: [],
+    syncStatus: {
+      brokerId: provider,
+      state: "connected",
+      lastSyncAt: connection.last_connected,
+      message: "Included connected Plaid/demo broker connection.",
+    },
+  };
+}
+
 router.get("/broker-engine/capabilities", (_req, res) => {
   res.json({
     success: true,
@@ -124,11 +255,13 @@ async function getAggregateSnapshot(
 
   if (!useLiveData()) {
     return {
-      snapshot: unavailableSnapshot(
-        brokerId,
-        "mock",
-        "Live broker data is disabled; included as an empty normalized mock snapshot.",
-      ),
+      snapshot: brokerId === "robinhood"
+        ? mockRobinhoodSnapshot()
+        : unavailableSnapshot(
+            brokerId,
+            "mock",
+            "Live broker data is disabled; included as an empty normalized mock snapshot.",
+          ),
     };
   }
 
@@ -168,11 +301,14 @@ router.get("/broker-engine/aggregate", async (_req, res) => {
   const skippedBrokers = results
     .map((result) => result.skipped)
     .filter((skipped): skipped is SkippedBrokerStatus => Boolean(skipped));
+  const connectionSnapshots = connectedBrokerConnections().map(connectionSnapshot);
+  const data = aggregateBrokerSnapshots([...snapshots, ...connectionSnapshots], skippedBrokers);
 
   res.json({
     success: true,
     source: "broker-engine",
-    data: aggregateBrokerSnapshots(snapshots, skippedBrokers),
+    status: data.sync_status.state,
+    data,
   });
 });
 
