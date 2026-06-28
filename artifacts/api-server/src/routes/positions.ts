@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { useLiveData, getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
+import { connectedBrokerPositions } from "../services/brokerConnectionsStore.js";
 
 const router: IRouter = Router();
 
@@ -98,6 +99,17 @@ router.get("/positions", async (req, res) => {
     } catch (err) {
       logger.warn(`[broker] getPositions failed, using mock: ${err instanceof Error ? err.message : err}`);
     }
+  }
+
+  const connectedPositions = connectedBrokerPositions();
+  if (connectedPositions.length > 0) {
+    res.json({
+      success: true,
+      source: "mock",
+      count: connectedPositions.length,
+      data: connectedPositions,
+    });
+    return;
   }
 
   res.json({ success: true, source: "mock", count: MOCK_POSITIONS.length, data: MOCK_POSITIONS });

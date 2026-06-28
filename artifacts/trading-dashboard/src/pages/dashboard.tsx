@@ -9,6 +9,7 @@ import {
   AiTradeQueueSection,
   NotificationsSection,
 } from "@/components/analytics-sections";
+import { BrokerConnectionsSection } from "@/components/broker-connections-section";
 
 export default function Dashboard() {
   const { data: portfolioRes, isLoading: isPortfolioLoading } = useGetPortfolio();
@@ -176,6 +177,7 @@ export default function Dashboard() {
       </div>
 
       <div className="border-t border-border/50 pt-8 space-y-10">
+        <BrokerConnectionsSection />
         <AnalyticsSection />
         <RiskSection />
         <PerformanceSection />
