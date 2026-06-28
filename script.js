@@ -12,6 +12,9 @@ const STORAGE_KEYS = {
 let quotes = {};
 let watchlist = loadFromStorage(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
 let livePortfolio = null;
+let livePortfolioSource = "mock";
+let portfolioFetchStatus = "offline";
+let portfolioLastSyncAt = null;
 let aiCommandCenter = null;
 let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
 let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
@@ -87,7 +90,7 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchAiCommandCenter();
 
   setInterval(fetchQuotes, 30000);
-  setInterval(fetchPortfolio, 30000);
+  setInterval(fetchPortfolio, 60000);
   setInterval(fetchAiCommandCenter, 30000);
 });
 
@@ -232,6 +235,12 @@ function setupButtons() {
     });
   }
 
+  const refreshPortfolioBtn = document.getElementById("refreshPortfolioBtn");
+
+  if (refreshPortfolioBtn) {
+    refreshPortfolioBtn.addEventListener("click", fetchPortfolio);
+  }
+
   const connectPlaidBtn = document.getElementById("connectPlaidBtn");
 
   if (connectPlaidBtn) {
@@ -304,7 +313,7 @@ async function checkBackendHealth() {
     setBackendStatus("Live", true);
     setText("backendHealthStatus", "Backend is live.");
   } catch (error) {
-    console.error("Backend health check failed:", error);
+    console.warn("Backend health check unavailable:", error);
     setBackendStatus("Offline", false);
     setText("backendHealthStatus", "Backend is offline or blocked.");
   }
@@ -359,7 +368,7 @@ async function fetchQuotes() {
     renderWatchlistTable();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Quote fetch failed:", error);
+    console.warn("Quote fetch unavailable:", error);
 
     setBackendStatus("Offline", false);
     setText("quoteStatus", "Quotes failed");
@@ -403,16 +412,21 @@ function getQuotePercent(quote) {
 async function fetchPortfolio() {
   try {
     const response = await fetch(`${BACKEND_URL}/api/portfolio`);
+
+    if (!response.ok) {
+      throw new Error(`Portfolio request failed with ${response.status}`);
+    }
+
     const result = await response.json();
 
-    if (!result.success || !result.data) {
-      throw new Error("Portfolio response failed");
+    if (!result.success || !result.data || typeof result.data !== "object") {
+      throw new Error("Portfolio response missing success/data");
     }
 
     livePortfolio = result.data;
-
-    console.log("LIVE PORTFOLIO DATA:", livePortfolio);
-    console.log("LIVE HOLDINGS:", getLiveHoldings());
+    livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
+    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
+    portfolioLastSyncAt = new Date();
 
     setBackendStatus("Live", true);
 
@@ -420,9 +434,13 @@ async function fetchPortfolio() {
     renderAccountsList();
     renderHoldingsTable();
   } catch (error) {
-    console.error("Portfolio fetch failed:", error);
+    console.warn("Portfolio fetch unavailable; keeping last data or mock fallback:", error);
 
-    livePortfolio = null;
+    portfolioFetchStatus = "offline";
+
+    if (!livePortfolio) {
+      livePortfolioSource = "mock";
+    }
 
     renderPortfolioSummary();
     renderAccountsList();
@@ -430,7 +448,57 @@ async function fetchPortfolio() {
   }
 }
 
-function getPortfolioValue(keyList, fallback = 0) {
+function normalizePortfolioSource(source) {
+  const normalized = String(source || "mock").trim().toLowerCase();
+
+  if (normalized === "robinhood") return "robinhood";
+
+  return "mock";
+}
+
+function getPortfolioSourceLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "robinhood/live";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "mock/mode";
+  }
+
+  return "offline";
+}
+
+function getPortfolioConnectionLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Robinhood Connected";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Mock Mode";
+  }
+
+  return "Offline";
+}
+
+function getPortfolioDataSourceLabel() {
+  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
+    return "Live Data Source: Robinhood";
+  }
+
+  if (portfolioFetchStatus === "mock") {
+    return "Live Data Source: Mock";
+  }
+
+  return "Live Data Source: Offline";
+}
+
+function getLastSyncLabel() {
+  if (!portfolioLastSyncAt) return "Last sync: never";
+
+  return `Last sync: ${portfolioLastSyncAt.toLocaleTimeString()}`;
+}
+
+function getPortfolioValue(keyList, fallback = 0, useFallbackWhenLive = false) {
   if (!livePortfolio) return fallback;
 
   for (const key of keyList) {
@@ -439,7 +507,7 @@ function getPortfolioValue(keyList, fallback = 0) {
     }
   }
 
-  return fallback;
+  return useFallbackWhenLive ? fallback : 0;
 }
 
 function getLiveHoldings() {
@@ -451,29 +519,32 @@ function getLiveHoldings() {
     livePortfolio.securities ||
     livePortfolio.accounts?.[0]?.holdings ||
     livePortfolio.accounts?.[0]?.positions ||
+    livePortfolio.account?.holdings ||
+    livePortfolio.account?.positions ||
     []
   );
 }
 
 function renderPortfolioSummary() {
   const totalValue = getPortfolioValue(
-    ["total_value", "totalValue", "balance", "equity"],
+    ["total_value", "totalValue", "total", "balance", "equity", "account_value"],
     52341.87
   );
 
   const buyingPower = getPortfolioValue(
-    ["buying_power", "buyingPower"],
+    ["buying_power", "buyingPower", "available_buying_power"],
     3241.56
   );
 
   const cash = getPortfolioValue(
-    ["cash", "cash_balance"],
+    ["cash", "cash_balance", "cashBalance", "cash_available"],
     3241.56
   );
 
   const investedValue = getPortfolioValue(
-    ["invested_value", "investedValue"],
-    totalValue - cash
+    ["invested_value", "investedValue", "market_value", "marketValue"],
+    totalValue - cash,
+    true
   );
 
   const dayChange = getPortfolioValue(
@@ -494,8 +565,13 @@ function renderPortfolioSummary() {
   setText("dailyPL", formatCurrency(dayChange));
   setText("dailyPercent", formatPercent(dayChangePercent));
   setText("openPositions", holdings.length || livePortfolio?.open_positions || 4);
-  setText("accountCount", livePortfolio ? "1 account connected" : "0 accounts connected");
-  setText("portfolioSource", livePortfolio ? "live" : "demo");
+  const accountCount = safeArray(livePortfolio?.accounts).length || (livePortfolio?.account_number ? 1 : 0);
+
+  setText("accountCount", livePortfolioSource === "robinhood" ? `${accountCount || 1} account connected` : "mock fallback");
+  setText("portfolioSource", getPortfolioSourceLabel());
+  setText("portfolioConnectionStatus", getPortfolioConnectionLabel());
+  setText("portfolioLastSync", getLastSyncLabel());
+  setText("portfolioDataSource", getPortfolioDataSourceLabel());
 
   setClass("dailyPL", getChangeClass(dayChange));
   setClass("dailyPercent", getChangeClass(dayChange));
@@ -511,17 +587,17 @@ function renderAccountsList() {
   if (!accountsList) return;
 
   if (livePortfolio) {
-    const accountName = livePortfolio.account_name || "Robinhood";
-    const totalValue = getPortfolioValue(["total_value", "totalValue", "balance", "equity"]);
-    const buyingPower = getPortfolioValue(["buying_power", "buyingPower"]);
-    const cash = getPortfolioValue(["cash", "cash_balance"]);
+    const accountName = livePortfolio.account_name || livePortfolio.broker || (livePortfolioSource === "robinhood" ? "Robinhood" : "Mock Portfolio");
+    const totalValue = getPortfolioValue(["total_value", "totalValue", "total", "balance", "equity", "account_value"]);
+    const buyingPower = getPortfolioValue(["buying_power", "buyingPower", "available_buying_power"]);
+    const cash = getPortfolioValue(["cash", "cash_balance", "cashBalance", "cash_available"]);
 
     accountsList.innerHTML = `
       <article class="account-card">
         <h4>${accountName}</h4>
 
-        <span class="status-pill status-connected">
-          Connected
+        <span class="status-pill ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
+          ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "Connected" : getPortfolioConnectionLabel()}
         </span>
 
         <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
@@ -556,7 +632,8 @@ function renderBrokerCards() {
 
   brokerCards.innerHTML = brokers.map((broker) => {
     const connected =
-      livePortfolio &&
+      portfolioFetchStatus === "live" &&
+      livePortfolioSource === "robinhood" &&
       broker.id === "robinhood";
 
     return `
@@ -586,7 +663,7 @@ function connectBroker(accountId) {
 
   if (!broker) return;
 
-  if (broker.id === "robinhood" && livePortfolio) {
+  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
     fetchPortfolio();
     alert("Robinhood sync started.");
     return;
@@ -600,6 +677,101 @@ function showPlaidPlaceholder() {
 }
 
 /* HOLDINGS */
+
+function firstFiniteNumber(values, fallback = 0) {
+  for (const value of values) {
+    const number = Number(value);
+
+    if (Number.isFinite(number)) return number;
+  }
+
+  return fallback;
+}
+
+function normalizeHoldingRow(holding) {
+  if (!holding || typeof holding !== "object") return null;
+
+  const symbol = normalizeTicker(
+    holding.symbol ||
+    holding.ticker ||
+    holding.instrument ||
+    holding.name
+  );
+
+  const quantity = firstFiniteNumber([
+    holding.quantity,
+    holding.shares,
+    holding.qty,
+    holding.units
+  ]);
+
+  if (!symbol || quantity <= 0) return null;
+
+  const quote = quotes[symbol] || {};
+  const currentPrice = firstFiniteNumber([
+    holding.current_price,
+    holding.currentPrice,
+    holding.price,
+    holding.last_price,
+    holding.market_price,
+    getQuotePrice(quote)
+  ]);
+
+  const marketValue = firstFiniteNumber([
+    holding.market_value,
+    holding.marketValue,
+    holding.value,
+    holding.equity,
+    currentPrice ? quantity * currentPrice : undefined
+  ]);
+
+  if (marketValue <= 0 && currentPrice <= 0) return null;
+
+  const avgCost = firstFiniteNumber([
+    holding.average_cost,
+    holding.avg_cost,
+    holding.averageCost,
+    holding.average_buy_price,
+    holding.cost_basis_per_share
+  ]);
+
+  const todaysChange = firstFiniteNumber([
+    holding.day_change,
+    holding.dayChange,
+    holding.today_change,
+    holding.todayChange,
+    holding.change,
+    holding.price_change
+  ]);
+
+  const explicitTotalGainLoss = firstFiniteNumber([
+    holding.total_gain_loss,
+    holding.totalGainLoss,
+    holding.unrealized_pl,
+    holding.unrealizedPL,
+    holding.gain_loss,
+    holding.gainLoss
+  ], NaN);
+
+  const totalCost = quantity * avgCost;
+  const totalGainLoss = Number.isFinite(explicitTotalGainLoss)
+    ? explicitTotalGainLoss
+    : totalCost
+      ? marketValue - totalCost
+      : 0;
+
+  const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
+
+  return {
+    symbol,
+    quantity,
+    currentPrice,
+    marketValue,
+    todaysChange,
+    totalGainLoss,
+    totalGainLossPercent
+  };
+}
 
 function renderHoldingsTable() {
   const holdingsTable = document.getElementById("holdingsTable");
@@ -627,63 +799,31 @@ function renderHoldingsTable() {
     return;
   }
 
-  holdingsTable.innerHTML = holdings.map((holding) => {
-    const symbol = normalizeTicker(
-      holding.symbol ||
-      holding.ticker ||
-      holding.instrument ||
-      holding.name ||
-      "UNKNOWN"
-    );
+  const rows = holdings
+    .map(normalizeHoldingRow)
+    .filter(Boolean);
 
-    const quantity = Number(
-      holding.quantity ||
-      holding.shares ||
-      holding.qty ||
-      holding.units ||
-      0
-    );
+  if (!rows.length) {
+    holdingsTable.innerHTML = `
+      <p class="muted">
+        Holdings were received, but none had enough valid data to display.
+      </p>
+    `;
+    return;
+  }
 
-    const avgCost = Number(
-      holding.average_cost ||
-      holding.avg_cost ||
-      holding.average_buy_price ||
-      holding.cost_basis_per_share ||
-      0
-    );
-
-    const quote = quotes[symbol] || {};
-
-    const currentPrice = Number(
-      holding.current_price ||
-      holding.price ||
-      holding.last_price ||
-      holding.market_price ||
-      getQuotePrice(quote) ||
-      0
-    );
-
-    const marketValue = Number(
-      holding.market_value ||
-      holding.value ||
-      holding.equity ||
-      quantity * currentPrice ||
-      0
-    );
-
-    const totalCost = quantity * avgCost;
-    const totalPL = avgCost ? marketValue - totalCost : 0;
-    const totalPLPercent = totalCost ? (totalPL / totalCost) * 100 : 0;
-
+  holdingsTable.innerHTML = rows.map((holding) => {
     return `
       <div class="table-row">
-        <strong>${symbol}</strong>
-        <span>${quantity.toLocaleString()} shares</span>
-        <span>Avg: ${avgCost ? formatCurrency(avgCost) : "--"}</span>
-        <span>Current: ${currentPrice ? formatCurrency(currentPrice) : "--"}</span>
-        <span>Value: ${formatCurrency(marketValue)}</span>
-        <span class="${getChangeClass(totalPL)}">
-          ${formatCurrency(totalPL)} / ${formatPercent(totalPLPercent)}
+        <strong>${holding.symbol}</strong>
+        <span>${holding.quantity.toLocaleString()} shares</span>
+        <span>Current: ${holding.currentPrice ? formatCurrency(holding.currentPrice) : "--"}</span>
+        <span>Value: ${formatCurrency(holding.marketValue)}</span>
+        <span class="${getChangeClass(holding.todaysChange)}">
+          Today: ${formatCurrency(holding.todaysChange)}
+        </span>
+        <span class="${getChangeClass(holding.totalGainLoss)}">
+          Total: ${formatCurrency(holding.totalGainLoss)} / ${formatPercent(holding.totalGainLossPercent)}
         </span>
       </div>
     `;
@@ -1056,7 +1196,7 @@ async function fetchAiCommandCenter() {
     aiCommandCenter = result.data;
     renderAiCommandCenter();
   } catch (error) {
-    console.error("AI command center failed:", error);
+    console.warn("AI command center unavailable:", error);
     aiCommandCenter = null;
     renderAiCommandCenter();
   }
