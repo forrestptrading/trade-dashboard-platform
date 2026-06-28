@@ -20,6 +20,8 @@ import riskRouter from "./risk";
 import performanceRouter from "./performance";
 import aiTradesRouter from "./aiTrades";
 import notificationsRouter from "./notifications";
+import brokerConnectionsRouter from "./brokerConnections";
+import plaidRouter from "./plaid";
 
 const router: IRouter = Router();
 
@@ -44,5 +46,7 @@ router.use(riskRouter);
 router.use(performanceRouter);
 router.use(aiTradesRouter);
 router.use(notificationsRouter);
+router.use(brokerConnectionsRouter);
+router.use(plaidRouter);
 
 export default router;
