@@ -37,8 +37,8 @@ externalPort = 3000
 USE_LIVE_DATA = "false"
 BROKER_TOKEN_ENCRYPTION_KEY = "ForrestBrokerTokenKey2026ABCDE"
 PLAID_CLIENT_ID = "6a41c2b2f3e41a000d26e076"
-PLAID_SECRET = "8f128d70373b66e1b633bd8b2584f9"
-PLAID_ENV = "production"
+PLAID_SECRET = "fb49cff15f21eed651e2117b737641"
+PLAID_ENV = "sandbox"
 
 [nix]
 channel = "stable-25_05"
