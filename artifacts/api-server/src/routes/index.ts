@@ -22,6 +22,7 @@ import aiTradesRouter from "./aiTrades";
 import notificationsRouter from "./notifications";
 import brokerConnectionsRouter from "./brokerConnections";
 import plaidRouter from "./plaid";
+import brokerEngineRouter from "./brokerEngine";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use(aiTradesRouter);
 router.use(notificationsRouter);
 router.use(brokerConnectionsRouter);
 router.use(plaidRouter);
+router.use(brokerEngineRouter);
 
 export default router;

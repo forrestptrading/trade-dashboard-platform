@@ -7,10 +7,18 @@ import {
   type BrokerProvider,
 } from "../services/brokerConnectionsStore.js";
 import { logger } from "../lib/logger.js";
+import { optionalAuth } from "../middlewares/auth.js";
+import { persistPlaidBrokerConnection } from "../services/persistedBrokerConnections.js";
+import { getPlaidSnapshotsForUser } from "../services/plaidSnapshots.js";
 
 const router: IRouter = Router();
 
+router.use(optionalAuth);
+
 const PLAID_NOT_CONFIGURED_MESSAGE = "Plaid is not configured yet. Demo connection is available.";
+const PLAID_AUTH_REQUIRED_MESSAGE = "Authentication is required to persist a Plaid connection.";
+
+let temporaryPlaidAccessToken: string | null = null;
 
 const createLinkTokenSchema = z.object({
   provider: z.string().refine(isBrokerProvider, {
@@ -22,6 +30,10 @@ const exchangePublicTokenSchema = z.object({
   provider: z.string().refine(isBrokerProvider, {
     message: "Unsupported broker provider",
   }),
+  public_token: z.string().min(1),
+});
+
+const directExchangePublicTokenSchema = z.object({
   public_token: z.string().min(1),
 });
 
@@ -62,6 +74,122 @@ async function postPlaid<T>(path: string, body: Record<string, unknown>): Promis
 
   return response.json() as Promise<T>;
 }
+
+
+
+router.get("/plaid/config-check", (_req, res) => {
+  res.json({
+    success: true,
+    plaid: {
+      client_id_present: Boolean(process.env["PLAID_CLIENT_ID"]?.trim()),
+      secret_present: Boolean(process.env["PLAID_SECRET"]?.trim()),
+      env_present: Boolean(process.env["PLAID_ENV"]?.trim()),
+      env: process.env["PLAID_ENV"] || null,
+    },
+  });
+});
+
+router.post("/plaid/create_link_token", async (_req, res) => {
+  if (!plaidConfigured()) {
+    res.status(500).json({ success: false, error: "Plaid is not configured" });
+    return;
+  }
+
+  try {
+    logger.info("[plaid] creating production Link token");
+    const data = await postPlaid<{ link_token: string }>("/link/token/create", {
+      client_name: "Forrest Trading Dashboard",
+      language: "en",
+      country_codes: ["US"],
+      products: ["investments"],
+      user: {
+        client_user_id: "forrest-main-user",
+      },
+    });
+
+    res.json({ success: true, link_token: data.link_token });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: msg }, "[plaid] direct create_link_token failed");
+    res.status(502).json({ success: false, error: "Failed to create Plaid link token" });
+  }
+});
+
+router.post("/plaid/exchange_public_token", async (req, res) => {
+  const parsed = directExchangePublicTokenSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: "Invalid Plaid public token exchange", details: parsed.error.flatten().fieldErrors });
+    return;
+  }
+
+  if (!plaidConfigured()) {
+    res.status(500).json({ success: false, error: "Plaid is not configured" });
+    return;
+  }
+
+  try {
+    logger.info("[plaid] exchanging public token with direct REST endpoint");
+    const data = await postPlaid<{ access_token: string; item_id: string }>(
+      "/item/public_token/exchange",
+      { public_token: parsed.data.public_token },
+    );
+
+    temporaryPlaidAccessToken = data.access_token;
+    logger.info({ itemId: data.item_id }, "[plaid] exchanged public token and stored temporary in-memory access token");
+    res.json({ success: true, item_id: data.item_id });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: msg }, "[plaid] direct exchange_public_token failed");
+    res.status(502).json({ success: false, error: "Failed to exchange Plaid public token" });
+  }
+});
+
+router.get("/plaid/investments", async (_req, res) => {
+  if (!plaidConfigured()) {
+    res.status(500).json({ success: false, error: "Plaid is not configured" });
+    return;
+  }
+
+  if (!temporaryPlaidAccessToken) {
+    res.status(400).json({ success: false, error: "No Plaid access token is stored in memory. Connect Plaid first." });
+    return;
+  }
+
+  try {
+    logger.info("[plaid] fetching investment holdings with temporary in-memory access token");
+    const data = await postPlaid<{ accounts?: unknown[]; holdings?: unknown[]; securities?: unknown[] }>(
+      "/investments/holdings/get",
+      { access_token: temporaryPlaidAccessToken },
+    );
+
+    res.json({
+      success: true,
+      accounts: data.accounts ?? [],
+      holdings: data.holdings ?? [],
+      securities: data.securities ?? [],
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: msg }, "[plaid] direct investments fetch failed");
+    res.status(502).json({ success: false, error: "Failed to fetch Plaid investments" });
+  }
+});
+
+router.get("/plaid/snapshots", async (req, res) => {
+  if (!req.user) {
+    res.status(401).json({ success: false, error: "Authentication required" });
+    return;
+  }
+
+  try {
+    const snapshots = await getPlaidSnapshotsForUser(req.user.id);
+    res.json({ success: true, source: "plaid", count: snapshots.length, data: snapshots });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: msg }, "[plaid] snapshot list failed");
+    res.status(500).json({ success: false, error: "Failed to load Plaid snapshots" });
+  }
+});
 
 router.post("/plaid/create-link-token", async (req, res) => {
   const parsed = createLinkTokenSchema.safeParse(req.body);
@@ -118,21 +246,72 @@ router.post("/plaid/exchange-public-token", async (req, res) => {
     return;
   }
 
+  if (!req.user) {
+    logger.warn({ provider }, "[plaid] authenticated user required before exchanging public token");
+    res.status(401).json({ success: false, error: PLAID_AUTH_REQUIRED_MESSAGE });
+    return;
+  }
+
   try {
     const data = await postPlaid<{ access_token: string; item_id: string; request_id: string }>(
       "/item/public_token/exchange",
       { public_token: parsed.data.public_token },
     );
 
-    const connection = createBrokerConnection({ provider });
-    storePlaidAccessToken(connection.id, {
-      accessToken: data.access_token,
-      itemId: data.item_id,
-      provider,
-    });
+    try {
+      const persistedConnection = await persistPlaidBrokerConnection({
+        userId: req.user.id,
+        provider,
+        label: provider,
+        accessToken: data.access_token,
+        itemId: data.item_id,
+        requestId: data.request_id,
+      });
 
-    logger.info({ provider, connectionId: connection.id, itemId: data.item_id }, "[plaid] exchanged public token and stored server-side access token");
-    res.json({ success: true, configured: true, source: "memory", request_id: data.request_id, data: connection });
+      logger.info({ provider, connectionId: persistedConnection.id, itemId: data.item_id }, "[plaid] exchanged public token and persisted encrypted broker credentials");
+      res.json({
+        success: true,
+        configured: true,
+        source: "database",
+        request_id: data.request_id,
+        data: {
+          id: persistedConnection.id,
+          name: persistedConnection.label || provider,
+          provider,
+          status: persistedConnection.status,
+          account_type: "brokerage",
+          last_connected: persistedConnection.updatedAt,
+        },
+      });
+      return;
+    } catch (persistErr) {
+      const msg = persistErr instanceof Error ? persistErr.message : String(persistErr);
+      logger.warn({ provider, err: msg }, "[plaid] encrypted credential persistence failed");
+
+      if (process.env["NODE_ENV"] === "production") {
+        res.status(500).json({ success: false, error: "Failed to persist Plaid credentials securely" });
+        return;
+      }
+
+      const connection = createBrokerConnection({ provider });
+      storePlaidAccessToken(connection.id, {
+        accessToken: data.access_token,
+        itemId: data.item_id,
+        provider,
+      });
+
+      logger.warn({ provider, connectionId: connection.id }, "[plaid] using non-production memory fallback for Plaid credentials");
+      res.json({
+        success: true,
+        configured: true,
+        source: "memory",
+        persistence: "memory_fallback",
+        warning: "Plaid credentials are stored in memory for this non-production run only.",
+        request_id: data.request_id,
+        data: connection,
+      });
+      return;
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err: msg }, "[plaid] public token exchange failed");
