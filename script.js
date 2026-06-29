@@ -903,18 +903,54 @@ function loadPlaidSdk() {
   });
 }
 
-function getPlaidExitMessage(error) {
-  const code = error?.error_code || error?.errorCode || "";
+function getSafePlaidExitDetails(error, metadata) {
+  const institution = metadata?.institution || {};
+
+  return {
+    error_code: error?.error_code || error?.errorCode || null,
+    error_message: error?.error_message || error?.errorMessage || error?.message || null,
+    display_message: error?.display_message || error?.displayMessage || null,
+    status: metadata?.status || null,
+    institution_name: institution.name || null,
+    link_session_id: metadata?.link_session_id || metadata?.linkSessionId || null
+  };
+}
+
+function formatPlaidExitReason(details) {
+  const reasonParts = [
+    details.display_message,
+    details.error_message,
+    details.error_code,
+    details.status,
+    details.institution_name ? `institution: ${details.institution_name}` : null,
+    details.link_session_id ? `session: ${details.link_session_id}` : null
+  ].filter(Boolean);
+
+  return reasonParts.length ? reasonParts.join(" | ") : "user closed Plaid Link before completing connection";
+}
+
+function getPlaidExitMessage(error, metadata) {
+  const details = getSafePlaidExitDetails(error, metadata);
+  const code = details.error_code || "";
 
   if (code.includes("INVALID_LINK_TOKEN")) {
-    return "Plaid Link token expired. Please try connecting again.";
+    return `Plaid exited before connection: Plaid Link token expired. ${formatPlaidExitReason(details)}`;
   }
 
   if (code.includes("INSTITUTION") || code.includes("ITEM_LOGIN_REQUIRED")) {
-    return "Plaid institution is unavailable. Please try again later.";
+    return `Plaid exited before connection: Plaid institution is unavailable. ${formatPlaidExitReason(details)}`;
   }
 
-  return "Plaid Link was closed before connecting.";
+  return `Plaid exited before connection: ${formatPlaidExitReason(details)}`;
+}
+
+function handlePlaidExit(error, metadata) {
+  const details = getSafePlaidExitDetails(error, metadata);
+  console.warn("Plaid Link exited before completion:", details);
+
+  plaidBusyProvider = null;
+  setPlaidStatus(getPlaidExitMessage(error, metadata), Boolean(error));
+  renderBrokerCards();
 }
 
 async function handlePlaidSuccess(provider, publicToken) {
@@ -990,11 +1026,7 @@ async function connectWithPlaid(provider) {
     const handler = window.Plaid.create({
       token: tokenResponse.link_token,
       onSuccess: (publicToken) => handlePlaidSuccess(provider, publicToken),
-      onExit: (error) => {
-        plaidBusyProvider = null;
-        setPlaidStatus(getPlaidExitMessage(error), Boolean(error));
-        renderBrokerCards();
-      }
+      onExit: handlePlaidExit
     });
 
     handler.open();
