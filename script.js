@@ -24,6 +24,7 @@ let advancedWatchlistFilter = "";
 let brokerConnections = [];
 let plaidMessage = "Plaid Link is ready.";
 let plaidBusyProvider = null;
+let plaidInvestments = null;
 let brokerEngineCapabilities = {};
 let brokerEngineAdapters = [];
 let brokerEngineStatus = "loading";
@@ -402,6 +403,7 @@ function renderAll() {
   renderBrokerCards();
   renderBrokerEngineStatus();
   renderPlaidStatus();
+  renderPlaidInvestments();
   renderHoldingsTable();
   renderOptions();
   renderRiskAnalysis();
@@ -736,7 +738,41 @@ function setPlaidStatus(message, isError = false) {
 }
 
 function renderPlaidStatus() {
-  setPlaidStatus(plaidMessage, plaidMessage.toLowerCase().includes("failed") || plaidMessage.toLowerCase().includes("unavailable"));
+  const normalizedMessage = plaidMessage.toLowerCase();
+  setPlaidStatus(
+    plaidMessage,
+    normalizedMessage.includes("failed") ||
+      normalizedMessage.includes("unavailable") ||
+      normalizedMessage.includes("error")
+  );
+}
+
+function renderPlaidInvestments() {
+  const summaryEl = document.getElementById("plaidInvestmentSummary");
+  if (!summaryEl) return;
+
+  if (!plaidInvestments) {
+    summaryEl.textContent = "";
+    summaryEl.className = "plaid-investment-summary muted";
+    return;
+  }
+
+  const accounts = safeArray(plaidInvestments.accounts);
+  const holdings = safeArray(plaidInvestments.holdings);
+  const securities = safeArray(plaidInvestments.securities);
+
+  if (!accounts.length && !holdings.length && !securities.length) {
+    summaryEl.textContent = "Plaid connected, but no investment holdings were found for this institution.";
+    summaryEl.className = "plaid-investment-summary muted";
+    return;
+  }
+
+  const holdingsLabel = holdings.length === 1 ? "holding" : "holdings";
+  const accountsLabel = accounts.length === 1 ? "account" : "accounts";
+  const securitiesLabel = securities.length === 1 ? "security" : "securities";
+
+  summaryEl.textContent = `Plaid investments loaded: ${accounts.length} ${accountsLabel}, ${holdings.length} ${holdingsLabel}, ${securities.length} ${securitiesLabel}.`;
+  summaryEl.className = "plaid-investment-summary status-connected";
 }
 
 async function fetchBrokerConnections() {
@@ -803,17 +839,47 @@ async function createBrokerConnection(provider) {
 }
 
 async function createPlaidLinkToken(provider) {
-  return apiFetchJson("/api/plaid/create-link-token", {
-    method: "POST",
-    body: JSON.stringify({ provider })
-  });
+  try {
+    return await apiFetchJson("/api/plaid/create_link_token", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+  } catch (error) {
+    console.warn("Direct Plaid Link token endpoint unavailable, trying legacy endpoint:", error);
+    return apiFetchJson("/api/plaid/create-link-token", {
+      method: "POST",
+      body: JSON.stringify({ provider })
+    });
+  }
 }
 
 async function exchangePlaidPublicToken(provider, publicToken) {
-  return apiFetchJson("/api/plaid/exchange-public-token", {
-    method: "POST",
-    body: JSON.stringify({ provider, public_token: publicToken })
-  });
+  try {
+    return await apiFetchJson("/api/plaid/exchange_public_token", {
+      method: "POST",
+      body: JSON.stringify({ public_token: publicToken })
+    });
+  } catch (error) {
+    console.warn("Direct Plaid token exchange endpoint unavailable, trying legacy endpoint:", error);
+    return apiFetchJson("/api/plaid/exchange-public-token", {
+      method: "POST",
+      body: JSON.stringify({ provider, public_token: publicToken })
+    });
+  }
+}
+
+async function fetchPlaidInvestments() {
+  const result = await apiFetchJson("/api/plaid/investments");
+
+  plaidInvestments = {
+    accounts: safeArray(result.accounts),
+    holdings: safeArray(result.holdings),
+    securities: safeArray(result.securities)
+  };
+
+  renderPlaidInvestments();
+
+  return plaidInvestments;
 }
 
 function loadPlaidSdk() {
@@ -852,14 +918,38 @@ function getPlaidExitMessage(error) {
 }
 
 async function handlePlaidSuccess(provider, publicToken) {
+  console.info("Plaid onSuccess callback fired.");
+  setPlaidStatus("Plaid success received. Exchanging token...");
+  renderBrokerCards();
+
   try {
+    setPlaidStatus("Exchanging Plaid token with backend...");
     await exchangePlaidPublicToken(provider, publicToken);
+    setPlaidStatus("Plaid connected successfully. Loading investment holdings...");
+
+    try {
+      const investments = await fetchPlaidInvestments();
+      const holdingCount = safeArray(investments.holdings).length;
+      const accountCount = safeArray(investments.accounts).length;
+
+      if (holdingCount || accountCount) {
+        setPlaidStatus("Plaid connected successfully. Investment data loaded.");
+      } else {
+        setPlaidStatus("Plaid connected successfully. No investment holdings found.");
+      }
+    } catch (investmentError) {
+      console.warn("Plaid investments fetch failed:", investmentError);
+      plaidInvestments = null;
+      renderPlaidInvestments();
+      setPlaidStatus("Plaid connected, but investment holdings are not available yet.", true);
+    }
+
     await fetchBrokerConnections();
     await fetchPortfolio();
-    setPlaidStatus("Connected. Portfolio and broker connections refreshed.");
+    await fetchAggregatePortfolio();
   } catch (error) {
     console.warn("Plaid public token exchange failed:", error);
-    setPlaidStatus("Plaid public token exchange failed. Please reconnect.", true);
+    setPlaidStatus("Plaid error: token exchange failed. Please reconnect.", true);
   } finally {
     plaidBusyProvider = null;
     renderBrokerCards();
@@ -873,13 +963,13 @@ async function connectWithPlaid(provider) {
   }
 
   plaidBusyProvider = provider;
-  setPlaidStatus("Requesting Plaid Link token...");
+  setPlaidStatus("Opening Plaid. Requesting Plaid Link token...");
   renderBrokerCards();
 
   try {
     const tokenResponse = await createPlaidLinkToken(provider);
 
-    if (!tokenResponse.configured || !tokenResponse.link_token) {
+    if (tokenResponse.configured === false || !tokenResponse.link_token) {
       setPlaidStatus(tokenResponse.message || "Plaid is not configured. Creating a demo broker connection.");
       await createBrokerConnection(provider);
       await fetchBrokerConnections();
@@ -891,6 +981,7 @@ async function connectWithPlaid(provider) {
     }
 
     await loadPlaidSdk();
+    setPlaidStatus("Opening Plaid Link. Complete the secure bank connection window.");
 
     if (!window.Plaid) {
       throw new Error("Plaid Link SDK unavailable");

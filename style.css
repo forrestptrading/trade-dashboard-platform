@@ -719,6 +719,11 @@ body {
   font-size: 13px;
 }
 
+.plaid-investment-summary {
+  margin: -6px 0 14px;
+  font-size: 13px;
+}
+
 .broker-card button:disabled {
   opacity: .65;
   cursor: not-allowed;
