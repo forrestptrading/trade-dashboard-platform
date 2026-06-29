@@ -12,12 +12,16 @@ import {
   type SkippedBrokerStatus,
 } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
+import { optionalAuth } from "../middlewares/auth.js";
+import { getPlaidSnapshotsForUser } from "../services/plaidSnapshots.js";
 import {
   connectedBrokerConnections,
   type BrokerConnectionRecord,
 } from "../services/brokerConnectionsStore.js";
 
 const router: IRouter = Router();
+
+router.use(optionalAuth);
 
 const BROKER_NAMES: Record<BrokerProviderId, string> = {
   robinhood: "Robinhood",
@@ -293,7 +297,7 @@ async function getAggregateSnapshot(
   }
 }
 
-router.get("/broker-engine/aggregate", async (_req, res) => {
+router.get("/broker-engine/aggregate", async (req, res) => {
   const results = await Promise.all(listBrokers().map((brokerId) => getAggregateSnapshot(brokerId)));
   const snapshots = results
     .map((result) => result.snapshot)
@@ -302,7 +306,39 @@ router.get("/broker-engine/aggregate", async (_req, res) => {
     .map((result) => result.skipped)
     .filter((skipped): skipped is SkippedBrokerStatus => Boolean(skipped));
   const connectionSnapshots = connectedBrokerConnections().map(connectionSnapshot);
-  const data = aggregateBrokerSnapshots([...snapshots, ...connectionSnapshots], skippedBrokers);
+  let plaidSnapshots: NormalizedBrokerSnapshot[] = [];
+  let skippedPlaidSnapshots: SkippedBrokerStatus[] = [];
+
+  if (req.user) {
+    try {
+      const syncedPlaidSnapshots = await getPlaidSnapshotsForUser(req.user.id);
+      plaidSnapshots = syncedPlaidSnapshots.filter((snapshot) => snapshot.syncStatus.state !== "error");
+      skippedPlaidSnapshots = syncedPlaidSnapshots
+        .filter((snapshot) => snapshot.syncStatus.state === "error")
+        .map((snapshot) => ({
+          broker_id: snapshot.brokerId,
+          reason: snapshot.syncStatus.message || "Plaid snapshot sync failed.",
+          status: "error" as const,
+        }));
+    } catch (error) {
+      logger.warn(
+        { userId: req.user.id, err: error instanceof Error ? error.message : String(error) },
+        "[broker-engine] Plaid snapshots unavailable during aggregate",
+      );
+      skippedPlaidSnapshots = [
+        {
+          broker_id: "sofi",
+          reason: "Plaid snapshots are unavailable. Check server logs for sanitized details.",
+          status: "error",
+        },
+      ];
+    }
+  }
+
+  const data = aggregateBrokerSnapshots(
+    [...snapshots, ...connectionSnapshots, ...plaidSnapshots],
+    [...skippedBrokers, ...skippedPlaidSnapshots],
+  );
 
   res.json({
     success: true,
