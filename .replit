@@ -35,6 +35,7 @@ externalPort = 3000
 
 [userenv.shared]
 USE_LIVE_DATA = "false"
+BROKER_TOKEN_ENCRYPTION_KEY = "ForrestBrokerTokenKey2026ABCDE"
 
 [nix]
 channel = "stable-25_05"
