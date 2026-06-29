@@ -14,6 +14,17 @@
 import { BROKER_CONFIG, buildRequestHeaders, getOptionalAccessToken } from "./config.js";
 import type { BrokerClient, BrokerHolding, OrderRequest } from "./brokerClient.js";
 import type {
+  BrokerAccountSummary,
+  BrokerDividend as NormalizedBrokerDividend,
+  BrokerHoldingPosition,
+  BrokerMoney,
+  BrokerOptionPosition,
+  BrokerOrder as NormalizedBrokerOrder,
+  BrokerSyncStatus,
+  BrokerTransaction,
+  NormalizedBrokerSnapshot,
+} from "./model.js";
+import type {
   BrokerSource,
   RobinhoodAccount,
   RobinhoodDividend,
@@ -66,6 +77,16 @@ async function fetchAllPages<T>(firstPath: string): Promise<T[]> {
   }
 
   return results;
+}
+
+function usd(value: unknown): BrokerMoney {
+  const amount = Number(value);
+  return { amount: Number.isFinite(amount) ? amount : 0, currency: "USD" };
+}
+
+function percent(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
 }
 
 // ── Client ──────────────────────────────────────────────────────────────────
@@ -198,6 +219,91 @@ class RobinhoodClient implements BrokerClient {
       .filter((h) => h.quantity > 0);
   }
 
+  async getAccountSummary(): Promise<BrokerAccountSummary> {
+    const [portfolio, account, holdings] = await Promise.all([
+      this.getPortfolio(),
+      this.getAccount(),
+      this.getHoldings(),
+    ]);
+    const equity = Number(portfolio.equity);
+    const previousClose = Number(
+      portfolio.adjusted_equity_previous_close ?? portfolio.equity_previous_close,
+    );
+    const investedValue = Number(portfolio.market_value);
+    const dayChange =
+      Number.isFinite(equity) && Number.isFinite(previousClose) ? equity - previousClose : 0;
+    const totalReturn = Number(portfolio.net_return);
+
+    return {
+      brokerId: this.brokerId,
+      accountId: account.id || account.account_number,
+      accountNumber: account.account_number,
+      accountName: "Robinhood",
+      institutionName: "Robinhood",
+      accountType: account.type === "cash" || account.type === "margin" ? account.type : "unknown",
+      totalValue: usd(portfolio.equity),
+      cash: usd(account.cash),
+      buyingPower: usd(account.buying_power),
+      investedValue: usd(
+        Number.isFinite(investedValue)
+          ? investedValue
+          : holdings.reduce((sum, holding) => sum + holding.market_value, 0),
+      ),
+      dayChange: usd(dayChange),
+      dayChangePercent: previousClose > 0 ? (dayChange / previousClose) * 100 : 0,
+      totalReturn: usd(totalReturn),
+      totalReturnPercent: 0,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async getCash(): Promise<BrokerMoney> {
+    const account = await this.getAccount();
+    return usd(account.cash);
+  }
+
+  async getBuyingPower(): Promise<BrokerMoney> {
+    const account = await this.getAccount();
+    return usd(account.buying_power);
+  }
+
+  async getNormalizedHoldings(): Promise<BrokerHoldingPosition[]> {
+    const holdings = await this.getHoldings();
+
+    return holdings.map((holding) => {
+      const currentPrice = holding.current_price ?? 0;
+      const averageCost = holding.average_cost ?? 0;
+      const totalGainLoss = holding.market_value - averageCost * holding.quantity;
+
+      return {
+        brokerId: this.brokerId,
+        accountName: holding.account_name,
+        symbol: holding.symbol,
+        quantity: holding.quantity,
+        averageCost: usd(averageCost),
+        currentPrice: usd(currentPrice),
+        marketValue: usd(holding.market_value),
+        totalGainLoss: usd(totalGainLoss),
+        totalGainLossPercent:
+          averageCost > 0 ? (totalGainLoss / (averageCost * holding.quantity)) * 100 : 0,
+        assetType: "equity",
+      };
+    });
+  }
+
+  async getNormalizedOptions(): Promise<BrokerOptionPosition[]> {
+    const page = await this.getOptionsPositions();
+
+    return (page.results ?? []).map((position) => ({
+      brokerId: this.brokerId,
+      symbol: position.chain_symbol,
+      underlyingSymbol: position.chain_symbol,
+      quantity: percent(position.quantity),
+      marketValue: usd(position.intraday_average_open_price),
+      contractType: "unknown",
+    }));
+  }
+
   /**
    * GET https://api.robinhood.com/options/positions/?nonzero=true
    * Requires ROBINHOOD_ACCESS_TOKEN.
@@ -312,6 +418,102 @@ class RobinhoodClient implements BrokerClient {
   async getDividends(): Promise<RobinhoodPaginated<RobinhoodDividend>> {
     const results = await fetchAllPages<RobinhoodDividend>("/dividends/");
     return { results, next: null, previous: null };
+  }
+
+  async getTransactions(): Promise<BrokerTransaction[]> {
+    const orders = await this.getOrders({ limit: 100 });
+
+    return (orders.results ?? []).map((order) => ({
+      brokerId: this.brokerId,
+      id: order.id,
+      symbol: order.instrument_id || undefined,
+      type: order.side === "buy" || order.side === "sell" ? order.side : "other",
+      amount: usd(order.price),
+      quantity: percent(order.quantity),
+      price: usd(order.price),
+      tradeDate: order.created_at,
+      description: `${order.side} ${order.quantity} ${order.instrument_id}`,
+    }));
+  }
+
+  async getNormalizedDividends(): Promise<NormalizedBrokerDividend[]> {
+    const dividends = await this.getDividends();
+
+    return (dividends.results ?? []).map((dividend) => ({
+      brokerId: this.brokerId,
+      id: dividend.id,
+      symbol: dividend.instrument || "UNKNOWN",
+      amount: usd(dividend.amount),
+      payableDate: dividend.payable_date,
+      recordDate: dividend.record_date,
+      status:
+        dividend.state === "paid" || dividend.state === "pending"
+          ? dividend.state
+          : "unknown",
+    }));
+  }
+
+  async getNormalizedOrders(): Promise<NormalizedBrokerOrder[]> {
+    const orders = await this.getOrders({ limit: 100 });
+
+    return (orders.results ?? []).map((order) => ({
+      brokerId: this.brokerId,
+      id: order.id,
+      symbol: order.instrument_id,
+      side: order.side,
+      quantity: percent(order.quantity),
+      orderType: order.type === "market" || order.type === "limit" ? order.type : "unknown",
+      status:
+        order.state === "queued" ||
+        order.state === "filled" ||
+        order.state === "cancelled" ||
+        order.state === "rejected"
+          ? order.state
+          : order.state === "confirmed"
+            ? "open"
+            : "unknown",
+      limitPrice: order.price ? usd(order.price) : undefined,
+      createdAt: order.created_at,
+      updatedAt: order.updated_at,
+    }));
+  }
+
+  async getSyncStatus(): Promise<BrokerSyncStatus> {
+    return {
+      brokerId: this.brokerId,
+      state: this.isAuthenticated() ? "connected" : "not_configured",
+      lastSyncAt: this.isAuthenticated() ? new Date().toISOString() : null,
+      message: this.isAuthenticated()
+        ? "Robinhood access token configured."
+        : "Robinhood access token is not configured.",
+    };
+  }
+
+  async getNormalizedSnapshot(): Promise<NormalizedBrokerSnapshot> {
+    const [accountSummary, holdings, options, transactions, dividends, orders, syncStatus] =
+      await Promise.all([
+        this.getAccountSummary(),
+        this.getNormalizedHoldings(),
+        this.getNormalizedOptions().catch(() => []),
+        this.getTransactions().catch(() => []),
+        this.getNormalizedDividends().catch(() => []),
+        this.getNormalizedOrders().catch(() => []),
+        this.getSyncStatus(),
+      ]);
+
+    return {
+      brokerId: this.brokerId,
+      source: this.brokerId,
+      accountSummary,
+      cash: accountSummary.cash,
+      buyingPower: accountSummary.buyingPower,
+      holdings,
+      options,
+      transactions,
+      dividends,
+      orders,
+      syncStatus,
+    };
   }
 
   // ── Market Data ────────────────────────────────────────────────────────────
