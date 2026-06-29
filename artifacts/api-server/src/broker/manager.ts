@@ -16,14 +16,11 @@ import { fidelityClient } from "./fidelityClient.js";
 import { sofiClient } from "./sofiClient.js";
 import { webullClient } from "./webullClient.js";
 import { interactiveBrokersClient } from "./interactiveBrokersClient.js";
+import { vanguardClient } from "./vanguardClient.js";
+import { etradeClient } from "./etradeClient.js";
+import type { BrokerProviderId } from "./model.js";
 
-export type BrokerId =
-  | "robinhood"
-  | "schwab"
-  | "fidelity"
-  | "sofi"
-  | "webull"
-  | "interactive-brokers";
+export type BrokerId = BrokerProviderId;
 
 /** The broker used when a caller does not specify one. */
 export const DEFAULT_BROKER_ID: BrokerId = "robinhood";
@@ -35,6 +32,8 @@ const registry: Record<BrokerId, BrokerClient> = {
   sofi: sofiClient,
   webull: webullClient,
   "interactive-brokers": interactiveBrokersClient,
+  vanguard: vanguardClient,
+  etrade: etradeClient,
 };
 
 /**
