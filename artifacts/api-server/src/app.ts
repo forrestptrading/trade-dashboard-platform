@@ -82,7 +82,9 @@ app.use((_req, res, next) => {
     if (name === SESSION_COOKIE_NAME && value) {
       res.setHeader("X-Session-Token", value);
     }
-    return originalCookie(name, value, options);
+    return options
+      ? originalCookie(name, value, options)
+      : originalCookie(name, value);
   }) as typeof res.cookie;
 
   next();
