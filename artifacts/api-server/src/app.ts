@@ -1,4 +1,5 @@
 import express, {
+  type CookieOptions,
   type Express,
   type NextFunction,
   type Request,
@@ -9,6 +10,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { SESSION_COOKIE_NAME } from "./lib/auth/session";
 
 const app: Express = express();
 const DEFAULT_DASHBOARD_ORIGIN = "https://forrestptrading.github.io";
@@ -55,6 +57,8 @@ app.use(
 app.use(
   cors({
     credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
+    exposedHeaders: ["X-Session-Token"],
     origin(origin, callback) {
       const isProduction = process.env["NODE_ENV"] === "production";
 
@@ -70,6 +74,19 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((_req, res, next) => {
+  const originalCookie = res.cookie.bind(res);
+
+  res.cookie = ((name: string, value: string, options?: CookieOptions) => {
+    if (name === SESSION_COOKIE_NAME && value) {
+      res.setHeader("X-Session-Token", value);
+    }
+    return originalCookie(name, value, options);
+  }) as typeof res.cookie;
+
+  next();
+});
 
 function requireDashboardOwnerEmail(
   req: Request,
