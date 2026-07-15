@@ -35,10 +35,9 @@ externalPort = 3000
 
 [userenv.shared]
 USE_LIVE_DATA = "false"
-BROKER_TOKEN_ENCRYPTION_KEY = "ForrestBrokerTokenKey2026ABCDE"
-PLAID_CLIENT_ID = "6a41c2b2f3e41a000d26e076"
-PLAID_SECRET = "fb49cff15f21eed651e2117b737641"
-PLAID_ENV = "sandbox"
+SNAPTRADE_CLIENT_ID = "PERS-H7NJ3E05XJGG7AF3VKJJ"
+NODE_ENV = "production"
+DASHBOARD_OWNER_EMAIL = ""
 
 [nix]
 channel = "stable-25_05"
