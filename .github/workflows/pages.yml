@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html style.css _site/
-          cat script.js api-credentials-patch.js snaptrade-frontend-patch.js > _site/script.js
+          cat script.js api-credentials-patch.js snaptrade-frontend-patch.js snaptrade-session-patch.js > _site/script.js
           cp index.html _site/404.html
 
       - name: Setup Pages
