@@ -30,9 +30,22 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Type-check API
-        run: pnpm --filter @workspace/api-server typecheck
+        run: |
+          set -o pipefail
+          pnpm --filter @workspace/api-server typecheck 2>&1 | tee /tmp/typecheck.log
 
       - name: Check deployed dashboard JavaScript
+        if: always()
         run: |
           cat script.js api-credentials-patch.js snaptrade-frontend-patch.js snaptrade-session-patch.js > /tmp/dashboard.js
-          node --check /tmp/dashboard.js
+          node --check /tmp/dashboard.js 2>&1 | tee /tmp/javascript-check.log
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-diagnostics
+          path: |
+            /tmp/typecheck.log
+            /tmp/javascript-check.log
+          if-no-files-found: ignore
