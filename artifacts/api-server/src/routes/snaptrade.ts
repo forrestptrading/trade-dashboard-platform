@@ -10,40 +10,51 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
-const API_BASE = "https://api.snaptrade.com";
-const DASHBOARD_URL =
+const SNAPTRADE_ORIGIN = "https://api.snaptrade.com";
+const API_PREFIX = "/api/v1";
+const DEFAULT_DASHBOARD_URL =
   "https://forrestptrading.github.io/trade-dashboard-platform/";
 
-type RecordValue = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
 
-function record(value: unknown): RecordValue {
+type SnapTradeRequestOptions = {
+  method?: "GET" | "POST";
+  body?: JsonObject;
+};
+
+function asRecord(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as RecordValue)
+    ? (value as JsonObject)
     : {};
 }
 
-function array(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
+function asArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  const object = asRecord(value);
+  for (const key of ["data", "results", "accounts", "positions", "balances", "authorizations"]) {
+    if (Array.isArray(object[key])) return object[key] as unknown[];
+  }
+  return [];
 }
 
-function pathValue(value: unknown, keys: string[]): unknown {
-  let current: unknown = value;
+function nested(value: unknown, keys: string[]): unknown {
+  let current = value;
   for (const key of keys) {
-    const currentRecord = record(current);
-    if (!(key in currentRecord)) return undefined;
-    current = currentRecord[key];
+    const object = asRecord(current);
+    if (!(key in object)) return undefined;
+    current = object[key];
   }
   return current;
 }
 
-function text(values: unknown[], fallback = ""): string {
+function firstText(values: unknown[], fallback = ""): string {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return fallback;
 }
 
-function number(values: unknown[], fallback = 0): number {
+function firstNumber(values: unknown[], fallback = 0): number {
   for (const value of values) {
     const parsed = typeof value === "number" ? value : Number(value);
     if (Number.isFinite(parsed)) return parsed;
@@ -51,18 +62,24 @@ function number(values: unknown[], fallback = 0): number {
   return fallback;
 }
 
-function orderedJson(value: unknown): string {
-  const keys: string[] = [];
-  const seen = new Set<string>();
-  JSON.stringify(value, (key, nestedValue) => {
-    if (!seen.has(key)) {
-      seen.add(key);
-      keys.push(key);
-    }
-    return nestedValue;
-  });
-  keys.sort();
-  return JSON.stringify(value, keys);
+function round(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value as JsonObject)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nestedValue]) => [key, canonicalize(nestedValue)]),
+  );
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
 }
 
 function configured(): boolean {
@@ -85,6 +102,7 @@ function requireOwner(req: Request, res: Response, next: NextFunction): void {
     });
     return;
   }
+
   if (req.user?.email.toLowerCase() !== owner) {
     res.status(403).json({
       success: false,
@@ -92,17 +110,13 @@ function requireOwner(req: Request, res: Response, next: NextFunction): void {
     });
     return;
   }
-  next();
-}
 
-interface RequestOptions {
-  method?: "GET" | "POST";
-  body?: RecordValue;
+  next();
 }
 
 async function requestSnapTrade<T>(
   apiPath: string,
-  options: RequestOptions = {},
+  options: SnapTradeRequestOptions = {},
 ): Promise<T> {
   const clientId = process.env["SNAPTRADE_CLIENT_ID"]?.trim();
   const consumerKey = process.env["SNAPTRADE_CONSUMER_KEY"]?.trim();
@@ -110,32 +124,33 @@ async function requestSnapTrade<T>(
     throw new Error("SnapTrade credentials are not configured");
   }
 
+  const signedPath = `${API_PREFIX}${apiPath}`;
   const query = new URLSearchParams({
     clientId,
     timestamp: Math.floor(Date.now() / 1000).toString(),
-  });
-  const body = options.body && Object.keys(options.body).length
+  }).toString();
+  const content = options.body && Object.keys(options.body).length
     ? options.body
     : null;
-  const signature = createHmac("sha256", encodeURI(consumerKey))
-    .update(
-      orderedJson({
-        content: body,
-        path: apiPath,
-        query: query.toString(),
-      }),
-    )
+  const signaturePayload = canonicalJson({
+    content,
+    path: signedPath,
+    query,
+  });
+  const signature = createHmac("sha256", consumerKey)
+    .update(signaturePayload, "utf8")
     .digest("base64");
 
-  const response = await fetch(`${API_BASE}${apiPath}?${query.toString()}`, {
+  const response = await fetch(`${SNAPTRADE_ORIGIN}${signedPath}?${query}`, {
     method: options.method ?? "GET",
     headers: {
       Accept: "application/json",
       Signature: signature,
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(content ? { "Content-Type": "application/json" } : {}),
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(content ? { body: JSON.stringify(content) } : {}),
   });
+
   const responseText = await response.text();
   let data: unknown = null;
   if (responseText) {
@@ -145,114 +160,207 @@ async function requestSnapTrade<T>(
       data = responseText;
     }
   }
+
   if (!response.ok) {
-    throw new Error(`SnapTrade HTTP ${response.status}`);
+    const requestId = response.headers.get("X-Request-ID") ?? undefined;
+    const detail = typeof data === "string"
+      ? data.slice(0, 240)
+      : firstText([
+          asRecord(data)["detail"],
+          asRecord(data)["message"],
+          asRecord(data)["error"],
+        ]);
+    logger.warn(
+      { status: response.status, requestId, apiPath, detail },
+      "[snaptrade] request failed",
+    );
+    throw new Error(
+      `SnapTrade request failed with HTTP ${response.status}${requestId ? ` (${requestId})` : ""}`,
+    );
   }
+
   return data as T;
+}
+
+function positionSymbol(position: JsonObject): string {
+  const instrument = asRecord(position["instrument"]);
+  const symbolObject = asRecord(position["symbol"]);
+  const nestedSymbol = asRecord(symbolObject["symbol"]);
+  return firstText([
+    instrument["symbol"],
+    nested(instrument, ["symbol", "symbol"]),
+    nestedSymbol["symbol"],
+    symbolObject["symbol"],
+    position["option_symbol"],
+    position["ticker"],
+    instrument["name"],
+  ], "Unknown").toUpperCase();
 }
 
 function normalizePosition(
   positionValue: unknown,
   accountValue: unknown,
-): RecordValue | null {
-  const position = record(positionValue);
-  const account = record(accountValue);
-  const instrument = record(position["instrument"]);
-  const symbol = text([
-    instrument["symbol"],
-    pathValue(position, ["symbol", "symbol", "symbol"]),
-    pathValue(position, ["symbol", "symbol"]),
-    position["ticker"],
-  ]).toUpperCase();
-  const quantity = number([
+): JsonObject | null {
+  const position = asRecord(positionValue);
+  const account = asRecord(accountValue);
+  const instrument = asRecord(position["instrument"]);
+  const units = firstNumber([
     position["units"],
     position["quantity"],
     position["shares"],
     position["fractional_units"],
   ]);
-  if (!symbol || quantity === 0) return null;
+  if (units === 0) return null;
 
-  const price = number([
+  const price = firstNumber([
+    nested(position, ["price", "amount"]),
     position["price"],
     position["current_price"],
     position["market_price"],
   ]);
-  const multiplier = number([instrument["multiplier"]], 1);
-  const marketValue = number(
-    [position["market_value"], position["value"]],
-    quantity * price * multiplier,
+  const multiplier = firstNumber([
+    instrument["multiplier"],
+    position["multiplier"],
+  ], 1);
+  const marketValue = firstNumber([
+    nested(position, ["market_value", "amount"]),
+    position["market_value"],
+    position["value"],
+  ], units * price * multiplier);
+  const cashEquivalent = Boolean(
+    position["cash_equivalent"] ?? instrument["cash_equivalent"],
   );
 
   return {
-    symbol,
-    quantity,
-    current_price: price,
-    market_value: marketValue,
-    average_price: number([
+    symbol: positionSymbol(position),
+    quantity: round(units, 8),
+    current_price: price ? round(price, 8) : null,
+    market_value: round(marketValue),
+    average_price: firstNumber([
+      nested(position, ["cost_basis", "amount"]),
       position["cost_basis"],
       position["average_purchase_price"],
       position["average_price"],
-    ]),
-    asset_type: text([instrument["kind"], position["type"]], "equity"),
-    account_id: text([account["id"]]),
-    account_name: text(
-      [account["name"], account["institution_name"]],
-      "Investment Account",
-    ),
+    ]) || null,
+    asset_type: firstText([
+      instrument["type"],
+      instrument["kind"],
+      position["type"],
+      position["option_type"],
+    ], "security"),
+    option_symbol: firstText([position["option_symbol"]]) || null,
+    cash_equivalent: cashEquivalent,
+    account_id: firstText([account["id"]]),
+    account_name: firstText([
+      account["name"],
+      account["institution_name"],
+      nested(account, ["institution", "name"]),
+    ], "Investment Account"),
   };
+}
+
+function currencyCode(balance: JsonObject): string {
+  return firstText([
+    nested(balance, ["currency", "code"]),
+    balance["currency"],
+  ]).toUpperCase();
+}
+
+function accountDataAsOf(
+  account: JsonObject,
+  positionPayload: unknown,
+  balancePayload: unknown,
+): string | null {
+  return firstText([
+    nested(positionPayload, ["data_freshness", "as_of"]),
+    nested(balancePayload, ["data_freshness", "as_of"]),
+    nested(account, ["sync_status", "holdings", "last_successful_sync"]),
+    account["updated_at"],
+  ]) || null;
 }
 
 function normalizeAccount(
   accountValue: unknown,
-  balanceValue: unknown,
-  positions: RecordValue[],
-): RecordValue {
-  const account = record(accountValue);
-  const balances = array(balanceValue).map(record);
-  const usd = balances.filter((balance) => {
-    const code = text([
-      pathValue(balance, ["currency", "code"]),
-      balance["currency"],
-    ]).toUpperCase();
+  balancePayload: unknown,
+  positions: JsonObject[],
+  dataAsOf: string | null,
+): JsonObject {
+  const account = asRecord(accountValue);
+  const balances = asArray(balancePayload).map(asRecord);
+  const usdBalances = balances.filter((balance) => {
+    const code = currencyCode(balance);
     return !code || code === "USD";
   });
-  const usableBalances = usd.length ? usd : balances;
+  const usableBalances = usdBalances.length ? usdBalances : balances;
   const cash = usableBalances.reduce(
-    (sum, balance) => sum + number([balance["cash"], balance["amount"]]),
+    (sum, balance) => sum + firstNumber([
+      nested(balance, ["cash", "amount"]),
+      balance["cash"],
+      balance["amount"],
+    ]),
     0,
   );
   const buyingPower = usableBalances.reduce(
-    (sum, balance) =>
-      sum + number([balance["buying_power"], balance["buyingPower"]]),
+    (sum, balance) => sum + firstNumber([
+      nested(balance, ["buying_power", "amount"]),
+      balance["buying_power"],
+      balance["buyingPower"],
+    ]),
     0,
   );
-  const investedValue = positions.reduce(
-    (sum, position) => sum + number([position["market_value"]]),
-    0,
-  );
-  const reportedTotal = number([
-    pathValue(account, ["balance", "total", "amount"]),
+  const investedValue = positions
+    .filter((position) => !position["cash_equivalent"])
+    .reduce((sum, position) => sum + firstNumber([position["market_value"]]), 0);
+  const reportedTotal = firstNumber([
+    nested(account, ["balance", "total", "amount"]),
+    nested(account, ["balance", "total"]),
     account["total_value"],
+    account["balance"],
   ]);
 
   return {
-    id: text([account["id"]]),
-    name: text(
-      [account["name"], account["institution_name"]],
-      "Investment Account",
-    ),
-    account_number: text([account["number"], account["account_number"]]),
-    status: text([account["status"]], "connected"),
-    cash,
-    buying_power: buyingPower,
-    invested_value: investedValue,
-    total_value: reportedTotal || cash + investedValue,
+    id: firstText([account["id"]]),
+    name: firstText([
+      account["name"],
+      account["institution_name"],
+      nested(account, ["institution", "name"]),
+    ], "Investment Account"),
+    account_number: firstText([
+      account["number"],
+      account["account_number"],
+    ]),
+    status: firstText([account["status"]], "connected"),
+    cash: round(cash),
+    buying_power: round(buyingPower),
+    invested_value: round(investedValue),
+    total_value: round(reportedTotal || cash + investedValue),
+    data_as_of: dataAsOf,
+    sync_status: account["sync_status"] ?? null,
   };
+}
+
+function oldestTimestamp(values: Array<string | null>): string | null {
+  const valid = values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+  if (!valid.length) return null;
+  return new Date(Math.min(...valid.map((value) => value.getTime()))).toISOString();
+}
+
+function freshnessLabel(dataAsOf: string | null): string {
+  if (!dataAsOf) return "Timestamp unavailable";
+  const ageMs = Date.now() - new Date(dataAsOf).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "Reported by SnapTrade";
+  const ageHours = ageMs / 3_600_000;
+  if (ageHours < 1) return "Less than 1 hour old";
+  if (ageHours < 24) return `${Math.floor(ageHours)} hours old`;
+  return `${Math.floor(ageHours / 24)} days old`;
 }
 
 router.use(requireAuth, requireOwner);
 router.use((_req, res, next) => {
-  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   next();
 });
 
@@ -260,6 +368,7 @@ router.get("/snaptrade/config-check", (_req, res) => {
   res.json({
     success: true,
     configured: configured(),
+    authentication_mode: "personal",
     client_id_present: Boolean(process.env["SNAPTRADE_CLIENT_ID"]?.trim()),
     consumer_key_present: Boolean(
       process.env["SNAPTRADE_CONSUMER_KEY"]?.trim(),
@@ -273,31 +382,31 @@ router.post("/snaptrade/connect", async (_req, res) => {
     res.status(503).json({ success: false, error: "SnapTrade is not configured" });
     return;
   }
+
   try {
-    const data = await requestSnapTrade<RecordValue>("/snapTrade/login", {
+    const data = asRecord(await requestSnapTrade<unknown>("/snapTrade/login", {
       method: "POST",
       body: {
         connectionType: "read",
         customRedirect:
-          process.env["DASHBOARD_PUBLIC_URL"]?.trim() || DASHBOARD_URL,
+          process.env["DASHBOARD_PUBLIC_URL"]?.trim() || DEFAULT_DASHBOARD_URL,
         immediateRedirect: true,
         showCloseButton: true,
         darkMode: true,
         connectionPortalVersion: "v4",
       },
-    });
-    const redirectUri = text([data["redirectURI"], data["redirect_uri"]]);
-    if (!redirectUri) throw new Error("Missing SnapTrade redirect URI");
-    res.json({ success: true, redirect_uri: redirectUri });
+    }));
+    const redirectUri = firstText([
+      data["redirectURI"],
+      data["redirect_uri"],
+      data["loginLink"],
+    ]);
+    if (!redirectUri) throw new Error("SnapTrade response omitted the connection link");
+    res.json({ success: true, source: "snaptrade", redirect_uri: redirectUri });
   } catch (error) {
-    logger.warn(
-      { err: error instanceof Error ? error.message : String(error) },
-      "[snaptrade] connection portal failed",
-    );
-    res.status(502).json({
-      success: false,
-      error: "Failed to open the SnapTrade connection portal",
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: message }, "[snaptrade] connection portal failed");
+    res.status(502).json({ success: false, error: message });
   }
 });
 
@@ -306,18 +415,19 @@ router.get("/snaptrade/connections", async (_req, res) => {
     res.status(503).json({ success: false, error: "SnapTrade is not configured" });
     return;
   }
+
   try {
-    const data = await requestSnapTrade<unknown[]>("/authorizations");
-    res.json({ success: true, source: "snaptrade", data: array(data) });
-  } catch (error) {
-    logger.warn(
-      { err: error instanceof Error ? error.message : String(error) },
-      "[snaptrade] connections failed",
-    );
-    res.status(502).json({
-      success: false,
-      error: "Failed to load SnapTrade connections",
+    const payload = await requestSnapTrade<unknown>("/authorizations");
+    res.json({
+      success: true,
+      source: "snaptrade",
+      data: asArray(payload),
+      retrieved_at: new Date().toISOString(),
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: message }, "[snaptrade] connections failed");
+    res.status(502).json({ success: false, error: message });
   }
 });
 
@@ -326,85 +436,119 @@ router.get("/snaptrade/portfolio", async (_req, res) => {
     res.status(503).json({ success: false, error: "SnapTrade is not configured" });
     return;
   }
+
   try {
-    const rawAccounts = array(await requestSnapTrade<unknown[]>("/accounts"));
+    const accountPayload = await requestSnapTrade<unknown>("/accounts");
+    const rawAccounts = asArray(accountPayload);
     const snapshots = await Promise.all(
       rawAccounts.map(async (accountValue) => {
-        const accountId = text([record(accountValue)["id"]]);
-        if (!accountId) return { accountValue, balances: [], positions: [] };
+        const account = asRecord(accountValue);
+        const accountId = firstText([account["id"]]);
+        if (!accountId) {
+          return {
+            accountValue,
+            balancePayload: [],
+            positionPayload: [],
+            positions: [] as JsonObject[],
+            dataAsOf: null as string | null,
+          };
+        }
+
         const [balanceResult, positionResult] = await Promise.allSettled([
-          requestSnapTrade<unknown[]>(
+          requestSnapTrade<unknown>(
             `/accounts/${encodeURIComponent(accountId)}/balances`,
           ),
           requestSnapTrade<unknown>(
             `/accounts/${encodeURIComponent(accountId)}/positions/all`,
           ),
         ]);
-        const balances =
-          balanceResult.status === "fulfilled" ? array(balanceResult.value) : [];
-        const positionPayload =
-          positionResult.status === "fulfilled" ? positionResult.value : [];
-        const rawPositions = Array.isArray(positionPayload)
-          ? positionPayload
-          : array(record(positionPayload)["results"]);
-        const positions = rawPositions
+        const balancePayload = balanceResult.status === "fulfilled"
+          ? balanceResult.value
+          : [];
+        const positionPayload = positionResult.status === "fulfilled"
+          ? positionResult.value
+          : [];
+        const positions = asArray(positionPayload)
           .map((position) => normalizePosition(position, accountValue))
-          .filter((position): position is RecordValue => Boolean(position));
-        return { accountValue, balances, positions };
+          .filter((position): position is JsonObject => Boolean(position));
+        const dataAsOf = accountDataAsOf(
+          account,
+          positionPayload,
+          balancePayload,
+        );
+
+        return {
+          accountValue,
+          balancePayload,
+          positionPayload,
+          positions,
+          dataAsOf,
+        };
       }),
     );
+
     const holdings = snapshots.flatMap((snapshot) => snapshot.positions);
     const accounts = snapshots.map((snapshot) =>
       normalizeAccount(
         snapshot.accountValue,
-        snapshot.balances,
+        snapshot.balancePayload,
         snapshot.positions,
+        snapshot.dataAsOf,
       ),
     );
     const cash = accounts.reduce(
-      (sum, account) => sum + number([account["cash"]]),
+      (sum, account) => sum + firstNumber([account["cash"]]),
       0,
     );
     const buyingPower = accounts.reduce(
-      (sum, account) => sum + number([account["buying_power"]]),
+      (sum, account) => sum + firstNumber([account["buying_power"]]),
       0,
     );
-    const investedValue = holdings.reduce(
-      (sum, holding) => sum + number([holding["market_value"]]),
+    const investedValue = accounts.reduce(
+      (sum, account) => sum + firstNumber([account["invested_value"]]),
       0,
     );
     const totalValue = accounts.reduce(
-      (sum, account) => sum + number([account["total_value"]]),
+      (sum, account) => sum + firstNumber([account["total_value"]]),
       0,
     );
+    const dataAsOf = oldestTimestamp(
+      snapshots.map((snapshot) => snapshot.dataAsOf),
+    );
+    const retrievedAt = new Date().toISOString();
 
     res.json({
       success: true,
       source: "snaptrade",
       data: {
         source: "snaptrade",
-        account_name: "SnapTrade",
-        total_value: totalValue || cash + investedValue,
-        cash,
-        buying_power: buyingPower,
-        invested_value: investedValue,
-        day_change: 0,
-        day_change_percent: 0,
+        account_name: "SnapTrade Personal",
+        total_value: round(totalValue || cash + investedValue),
+        cash: round(cash),
+        buying_power: round(buyingPower),
+        invested_value: round(investedValue),
+        day_change: null,
+        day_change_percent: null,
         accounts,
         holdings,
-        open_positions: holdings.length,
-        updated_at: new Date().toISOString(),
+        open_positions: holdings.filter(
+          (holding) => !holding["cash_equivalent"],
+        ).length,
+        data_as_of: dataAsOf,
+        freshness_label: freshnessLabel(dataAsOf),
+        retrieved_at: retrievedAt,
+        data_freshness: snapshots.map((snapshot, index) => ({
+          account_id: accounts[index]?.["id"] ?? null,
+          account_name: accounts[index]?.["name"] ?? "Investment Account",
+          data_as_of: snapshot.dataAsOf,
+          sync_status: asRecord(snapshot.accountValue)["sync_status"] ?? null,
+        })),
       },
     });
   } catch (error) {
-    logger.warn(
-      { err: error instanceof Error ? error.message : String(error) },
-      "[snaptrade] portfolio failed",
-    );
-    res.status(502).json({
-      success: false,
-      error: "Failed to load SnapTrade portfolio",
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ err: message }, "[snaptrade] portfolio failed");
+    res.status(502).json({ success: false, error: message });
   }
 });
 
