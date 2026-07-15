@@ -1,14 +1,13 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
   <title>Forrest Trading Dashboard</title>
   <base href="/trade-dashboard-platform/" />
-  <link rel="stylesheet" href="style.css?v=4.8" />
+  <link rel="stylesheet" href="style.css?v=5.0" />
 </head>
-
 <body>
   <div class="app-shell">
     <aside class="sidebar">
@@ -16,30 +15,25 @@
         <div class="brand-icon">FP</div>
         <div>
           <h1>Trading Hub</h1>
-          <p>Multi-platform dashboard</p>
+          <p>Connected investment dashboard</p>
         </div>
       </div>
 
-      <nav class="side-nav">
+      <nav class="side-nav" aria-label="Dashboard navigation">
         <button class="nav-btn active" data-section="overview">Overview</button>
         <button class="nav-btn" data-section="watchlist">Watchlist</button>
-        <button class="nav-btn" data-section="marketWorkspace">Market</button>
-        <button class="nav-btn" data-section="newsCenter">News</button>
-        <button class="nav-btn" data-section="economicCalendar">Calendar</button>
-        <button class="nav-btn" data-section="optionsDashboard">Options Pro</button>
         <button class="nav-btn" data-section="accounts">Accounts</button>
         <button class="nav-btn" data-section="holdings">Holdings</button>
         <button class="nav-btn" data-section="options">Options</button>
-        <button class="nav-btn" data-section="activity">Activity</button>
+        <button class="nav-btn" data-section="activity">Journal</button>
         <button class="nav-btn" data-section="settings">Settings</button>
       </nav>
 
       <div class="sidebar-footer">
-        <p>Backend</p>
+        <p>API</p>
         <span id="backendStatus">Checking...</span>
-
-        <p>Market Data: <strong id="quoteStatus">Loading...</strong></p>
-        <p>Last Updated: <strong id="lastQuoteUpdate">Not updated yet</strong></p>
+        <p>Market Data: <strong id="quoteStatus">Checking...</strong></p>
+        <p>Last Quote Update: <strong id="lastQuoteUpdate">Never</strong></p>
       </div>
     </aside>
 
@@ -47,11 +41,9 @@
       <header class="topbar">
         <div>
           <h2>Portfolio Overview</h2>
-          <p>Live quotes, portfolio tracking, AI alerts, and trade approval.</p>
+          <p>Only connected brokerage data is shown. No demonstration balances are used.</p>
         </div>
-
-        <button id="refreshQuotesBtn">Refresh Data</button>
-        <button id="refreshPortfolioBtn">Refresh Portfolio</button>
+        <button id="refreshDataBtn" type="button">Refresh Data</button>
       </header>
 
       <section id="overview" class="page-section active-section">
@@ -59,140 +51,57 @@
           <article class="summary-card">
             <span>Portfolio Value</span>
             <strong id="portfolioValue">$0.00</strong>
-            <small id="portfolioSource">loading</small>
+            <small id="portfolioSource">SnapTrade not connected</small>
           </article>
-
           <article class="summary-card">
             <span>Buying Power</span>
             <strong id="buyingPower">$0.00</strong>
-            <small>Available to trade</small>
+            <small>Reported by connected brokerage</small>
           </article>
-
           <article class="summary-card">
             <span>Cash</span>
             <strong id="cash">$0.00</strong>
-            <small>Cash balance</small>
+            <small>Reported cash balance</small>
           </article>
-
           <article class="summary-card">
             <span>Invested Value</span>
             <strong id="investedValue">$0.00</strong>
-            <small>Market value invested</small>
+            <small>Non-cash positions</small>
           </article>
-
           <article class="summary-card">
             <span>Daily P/L</span>
-            <strong id="dailyPL">$0.00</strong>
-            <small id="dailyPercent">0.00%</small>
+            <strong id="dailyPL">--</strong>
+            <small id="dailyPercent">Not supplied by brokerage feed</small>
           </article>
-
           <article class="summary-card">
             <span>Open Positions</span>
             <strong id="openPositions">0</strong>
             <small id="accountCount">0 accounts connected</small>
           </article>
-
           <article class="summary-card">
             <span>Connection Status</span>
-            <strong id="portfolioConnectionStatus">Offline</strong>
-            <small id="portfolioLastSync">Last sync: never</small>
-            <small id="portfolioDataSource">Source: mock</small>
+            <strong id="portfolioConnectionStatus">Not Connected</strong>
+            <small id="portfolioLastSync">Data as of: unavailable</small>
+            <small id="portfolioDataSource">Source: SnapTrade</small>
           </article>
-
           <article class="summary-card">
-            <span>Risk Score</span>
-            <strong id="riskScore">--</strong>
-            <small>Options risk level</small>
+            <span>Data Freshness</span>
+            <strong id="dataFreshnessStatus">Unavailable</strong>
+            <small id="dataRetrievedAt">Retrieved: never</small>
           </article>
         </div>
-
-        <section class="panel aggregate-portfolio-panel">
-          <div class="panel-header">
-            <div>
-              <h3>Aggregate Portfolio</h3>
-              <p>Unified Broker Engine view across available broker snapshots.</p>
-            </div>
-
-            <span id="aggregatePortfolioStatus" class="status-pill status-coming">Loading</span>
-          </div>
-
-          <div class="aggregate-portfolio-grid">
-            <article class="aggregate-portfolio-card">
-              <span>Total Value</span>
-              <strong id="aggregateTotalValue">$0.00</strong>
-            </article>
-
-            <article class="aggregate-portfolio-card">
-              <span>Cash</span>
-              <strong id="aggregateCash">$0.00</strong>
-            </article>
-
-            <article class="aggregate-portfolio-card">
-              <span>Buying Power</span>
-              <strong id="aggregateBuyingPower">$0.00</strong>
-            </article>
-
-            <article class="aggregate-portfolio-card">
-              <span>Invested Value</span>
-              <strong id="aggregateInvestedValue">$0.00</strong>
-            </article>
-          </div>
-
-          <div class="aggregate-portfolio-meta">
-            <span>Included Brokers: <strong id="aggregateIncludedBrokers">none</strong></span>
-            <span>Skipped Brokers: <strong id="aggregateSkippedBrokers">0</strong></span>
-            <span>Sync Status: <strong id="aggregateSyncStatus">loading</strong></span>
-          </div>
-        </section>
-
-        <section class="panel ai-command-panel">
-          <div class="panel-header">
-            <div>
-              <h3>AI Command Center</h3>
-              <p>Options alerts, breakouts, earnings watches, and risk signals.</p>
-            </div>
-          </div>
-
-          <div class="ai-command-summary">
-            <article class="summary-card">
-              <span>AI Confidence</span>
-              <strong id="aiConfidenceScore">--</strong>
-              <small>Overall signal score</small>
-            </article>
-
-            <article class="summary-card">
-              <span>Market Bias</span>
-              <strong id="aiMarketBias">Loading</strong>
-              <small>Current AI market view</small>
-            </article>
-          </div>
-
-          <div id="aiCommandSummary" class="muted">
-            Loading AI command center...
-          </div>
-
-          <div id="aiCommandAlerts" class="ai-alerts-container">
-            <p class="muted">Loading AI command alerts...</p>
-          </div>
-
-          <div id="aiOptionsAlerts" class="ai-alerts-container">
-            <p class="muted">Loading AI option alerts...</p>
-          </div>
-        </section>
 
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Live Quotes</h3>
-              <p>Your watchlist powered by the backend.</p>
+              <h3>Live Watchlist Quotes</h3>
+              <p>Quotes appear only when the API has a live market-data provider.</p>
             </div>
-
             <form id="addTickerForm" class="inline-form">
-              <input id="tickerInput" type="text" placeholder="Add ticker" />
+              <input id="tickerInput" type="text" placeholder="Add ticker" maxlength="12" />
               <button type="submit">Add</button>
             </form>
           </div>
-
           <div id="quoteGrid" class="quote-grid"></div>
         </section>
       </section>
@@ -202,186 +111,52 @@
           <div class="panel-header">
             <div>
               <h3>Watchlist</h3>
-              <p>Add or remove symbols from your live quote list.</p>
+              <p>Symbols are stored on this device. Prices are never fabricated.</p>
             </div>
-
-            <form id="watchlistForm" class="inline-form">
-              <input id="watchlistInput" type="text" placeholder="Ticker" />
-              <button type="submit">Add</button>
-            </form>
           </div>
-
           <div id="watchlistTable" class="table-list"></div>
-        </section>
-
-        <section class="panel pro-panel">
-          <div class="panel-header">
-            <div>
-              <h3>Advanced Watchlist</h3>
-              <p>Sortable workspace ready for volume, market cap, and alert APIs.</p>
-            </div>
-
-            <input id="advancedWatchlistSearch" class="workspace-search" type="text" placeholder="Filter symbols" />
-          </div>
-
-          <div class="workspace-table-header advanced-watchlist-header">
-            <button data-watchlist-sort="symbol">Symbol</button>
-            <button data-watchlist-sort="price">Price</button>
-            <button data-watchlist-sort="percent">%</button>
-            <button data-watchlist-sort="volume">Volume</button>
-            <button data-watchlist-sort="marketCap">Market Cap</button>
-            <span>Alert</span>
-          </div>
-
-          <div id="advancedWatchlistTable" class="workspace-table"></div>
-        </section>
-      </section>
-
-      <section id="marketWorkspace" class="page-section">
-        <section class="panel pro-panel">
-          <div class="panel-header">
-            <div>
-              <h3>Market Heat Map</h3>
-              <p>Sector performance and market breadth placeholders for future live APIs.</p>
-            </div>
-          </div>
-
-          <div id="marketHeatMap" class="heat-map-grid"></div>
-
-          <div class="workspace-grid compact-grid">
-            <article class="workspace-card">
-              <span>Advancers</span>
-              <strong id="marketAdvancers">--</strong>
-              <small>Market breadth placeholder</small>
-            </article>
-            <article class="workspace-card">
-              <span>Decliners</span>
-              <strong id="marketDecliners">--</strong>
-              <small>Market breadth placeholder</small>
-            </article>
-            <article class="workspace-card">
-              <span>New Highs</span>
-              <strong id="marketHighs">--</strong>
-              <small>52-week high placeholder</small>
-            </article>
-            <article class="workspace-card">
-              <span>New Lows</span>
-              <strong id="marketLows">--</strong>
-              <small>52-week low placeholder</small>
-            </article>
-          </div>
-        </section>
-      </section>
-
-      <section id="newsCenter" class="page-section">
-        <section class="panel pro-panel">
-          <div class="panel-header">
-            <div>
-              <h3>News Center</h3>
-              <p>Market, company, and watchlist news placeholders with API-ready feeds.</p>
-            </div>
-          </div>
-
-          <div class="workspace-grid news-grid">
-            <article class="workspace-card">
-              <h4>Market News</h4>
-              <div id="marketNewsFeed" class="news-feed"></div>
-            </article>
-            <article class="workspace-card">
-              <h4>Company News</h4>
-              <div id="companyNewsFeed" class="news-feed"></div>
-            </article>
-            <article class="workspace-card">
-              <h4>Watchlist News</h4>
-              <div id="watchlistNewsFeed" class="news-feed"></div>
-            </article>
-          </div>
-        </section>
-      </section>
-
-      <section id="economicCalendar" class="page-section">
-        <section class="panel pro-panel">
-          <div class="panel-header">
-            <div>
-              <h3>Economic Calendar</h3>
-              <p>Upcoming macro and earnings events ready for economic data APIs.</p>
-            </div>
-          </div>
-
-          <div id="economicCalendarList" class="timeline-list"></div>
-        </section>
-      </section>
-
-      <section id="optionsDashboard" class="page-section">
-        <section class="panel pro-panel">
-          <div class="panel-header">
-            <div>
-              <h3>Options Dashboard</h3>
-              <p>Unusual activity, IV, volume, and put/call placeholders for live backend data.</p>
-            </div>
-          </div>
-
-          <div class="workspace-grid compact-grid">
-            <article class="workspace-card">
-              <span>Put/Call Ratio</span>
-              <strong id="putCallRatio">--</strong>
-              <small>Live backend ready</small>
-            </article>
-            <article class="workspace-card">
-              <span>Highest IV</span>
-              <strong id="highestIvTicker">--</strong>
-              <small id="highestIvValue">Waiting for feed</small>
-            </article>
-            <article class="workspace-card">
-              <span>Highest Volume</span>
-              <strong id="highestOptionVolumeTicker">--</strong>
-              <small id="highestOptionVolumeValue">Waiting for feed</small>
-            </article>
-          </div>
-
-          <div id="unusualOptionsTable" class="workspace-table"></div>
         </section>
       </section>
 
       <section id="accounts" class="page-section">
+        <section id="dashboardAuthPanel" class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Dashboard Sign In</h3>
+              <p>Private investment data is available only to the configured dashboard owner.</p>
+            </div>
+            <span id="authStatus" class="status-pill status-coming">Checking</span>
+          </div>
+          <form id="authForm" class="journal-form">
+            <input id="authEmail" type="email" autocomplete="email" placeholder="Owner email" required />
+            <input id="authPassword" type="password" autocomplete="current-password" placeholder="Password" minlength="8" required />
+            <button id="loginBtn" type="submit">Sign In</button>
+            <button id="registerBtn" type="button">Create Account</button>
+            <button id="logoutBtn" type="button" hidden>Sign Out</button>
+          </form>
+          <p id="authMessage" class="muted">Checking your dashboard session...</p>
+        </section>
+
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Connected Accounts</h3>
-              <p>Brokerage connection status and balances.</p>
+              <h3>Connected Investment Accounts</h3>
+              <p>Read-only brokerage linking and holdings data through SnapTrade Personal.</p>
             </div>
-
-            <button id="connectPlaidBtn">Connect With Plaid</button>
+            <button id="connectBrokerageBtn" type="button" disabled>Connect Brokerage</button>
           </div>
-
-          <div id="plaidStatusMessage" class="plaid-status muted">Plaid Link is ready.</div>
-          <div id="plaidInvestmentSummary" class="plaid-investment-summary muted"></div>
+          <div id="brokerageStatusMessage" class="plaid-status muted">Sign in to connect a brokerage.</div>
           <div id="accountsList" class="card-grid"></div>
         </section>
 
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Broker Connections</h3>
-              <p>Robinhood, SoFi, Fidelity, Schwab, and Webull framework.</p>
+              <h3>Brokerage Connections</h3>
+              <p>Connection status returned directly by SnapTrade.</p>
             </div>
           </div>
-
-          <div id="brokerCards" class="card-grid"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h3>Broker Engine Status</h3>
-              <p>Read-only backend adapter and capability status.</p>
-            </div>
-
-            <span id="brokerEngineStatus" class="status-pill status-coming">Loading</span>
-          </div>
-
-          <p id="brokerEngineUpdatedAt" class="muted">Last checked: never</p>
-          <div id="brokerEngineAdapters" class="broker-engine-grid"></div>
+          <div id="brokerConnections" class="card-grid"></div>
         </section>
       </section>
 
@@ -390,10 +165,9 @@
           <div class="panel-header">
             <div>
               <h3>Holdings</h3>
-              <p>Live holdings from the backend portfolio endpoint.</p>
+              <p>Current non-cash positions from connected brokerage accounts.</p>
             </div>
           </div>
-
           <div id="holdingsTable" class="table-list"></div>
         </section>
       </section>
@@ -402,43 +176,23 @@
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Options Summary</h3>
-              <p>Open options, P/L, win rate, and risk.</p>
+              <h3>Options Positions</h3>
+              <p>Only option positions returned by the connected brokerage feed are displayed.</p>
             </div>
           </div>
-
           <div class="summary-grid">
             <article class="summary-card">
-              <span>Contracts</span>
-              <strong id="optionContracts">0</strong>
-              <small>Open contracts</small>
+              <span>Option Positions</span>
+              <strong id="optionPositionCount">0</strong>
+              <small>Connected positions</small>
             </article>
-
             <article class="summary-card">
-              <span>Options P/L</span>
-              <strong id="optionsPL">$0.00</strong>
-              <small>Total unrealized</small>
-            </article>
-
-            <article class="summary-card">
-              <span>Win Rate</span>
-              <strong id="optionWinRate">0%</strong>
-              <small>Sample options</small>
+              <span>Options Market Value</span>
+              <strong id="optionsMarketValue">$0.00</strong>
+              <small>Current reported value</small>
             </article>
           </div>
-
-          <div id="openOptionsTable" class="table-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <h3>Options Risk Analysis</h3>
-              <p>Risk score based on current contract exposure.</p>
-            </div>
-          </div>
-
-          <div id="riskAnalysisBox"></div>
+          <div id="optionsTable" class="table-list"></div>
         </section>
       </section>
 
@@ -446,39 +200,16 @@
         <section class="panel">
           <div class="panel-header">
             <div>
-              <h3>Pending Trade Approval</h3>
-              <p>Review AI or manual trade ideas before acting.</p>
-            </div>
-          </div>
-
-          <article class="approval-card">
-            <h4 id="approvalTicker">Loading...</h4>
-            <p id="approvalDescription">Loading trade idea...</p>
-
-            <div class="button-row">
-              <button id="approveTradeBtn">Approve</button>
-              <button id="rejectTradeBtn">Reject</button>
-            </div>
-          </article>
-
-          <div id="approvalHistory"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
               <h3>Trade Journal</h3>
-              <p>Log your trades and results.</p>
+              <p>Journal entries are entered by you and stored on this device.</p>
             </div>
           </div>
-
           <form id="journalForm" class="journal-form">
-            <input id="journalTicker" type="text" placeholder="Ticker" />
+            <input id="journalTicker" type="text" placeholder="Ticker" maxlength="12" />
             <input id="journalStrategy" type="text" placeholder="Strategy" />
             <input id="journalResult" type="text" placeholder="Result" />
             <button type="submit">Save Entry</button>
           </form>
-
           <div id="journalEntries"></div>
         </section>
       </section>
@@ -488,21 +219,20 @@
           <div class="panel-header">
             <div>
               <h3>Settings</h3>
-              <p>Dashboard preferences and backend health.</p>
+              <p>Connection diagnostics and local preferences.</p>
             </div>
           </div>
-
           <div class="settings-grid">
             <div>
               <label for="goalInput">Portfolio Goal</label>
-              <input id="goalInput" type="number" placeholder="Enter goal" />
-              <button id="saveGoalBtn">Save Goal</button>
+              <input id="goalInput" type="number" min="0" step="0.01" placeholder="Enter goal" />
+              <button id="saveGoalBtn" type="button">Save Goal</button>
+              <p id="goalStatus" class="muted"></p>
             </div>
-
             <div>
-              <p id="backendHealthStatus">Checking backend...</p>
-              <button id="enableNotificationsBtn">Enable Notifications</button>
-              <button id="testNotificationBtn">Test Alert</button>
+              <p id="backendHealthStatus">Checking API...</p>
+              <p id="snapTradeConfigStatus">Checking SnapTrade configuration...</p>
+              <p class="muted">A disconnected or unavailable feed displays zeros or dashes, never substitute balances.</p>
             </div>
           </div>
         </section>
@@ -510,6 +240,6 @@
     </main>
   </div>
 
-  <script src="script.js?v=10.3"></script>
+  <script src="script.js?v=11.0"></script>
 </body>
 </html>
