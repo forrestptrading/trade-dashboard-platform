@@ -17,10 +17,9 @@ const DEFAULT_DASHBOARD_ORIGIN = "https://forrestptrading.github.io";
 const DEFAULT_API_ORIGIN =
   "https://trade-dashboard-api--forrestpbusines.replit.app";
 
-function getAllowedOrigins(): Set<string> {
+function allowedOrigins(): Set<string> {
   const origins = new Set([DEFAULT_DASHBOARD_ORIGIN, DEFAULT_API_ORIGIN]);
   const configuredUrl = process.env["DASHBOARD_PUBLIC_URL"]?.trim();
-
   if (configuredUrl) {
     try {
       origins.add(new URL(configuredUrl).origin);
@@ -28,11 +27,10 @@ function getAllowedOrigins(): Set<string> {
       logger.warn("[cors] DASHBOARD_PUBLIC_URL is not a valid URL");
     }
   }
-
   return origins;
 }
 
-const allowedOrigins = getAllowedOrigins();
+const productionOrigins = allowedOrigins();
 
 app.use(
   pinoHttp({
@@ -46,9 +44,7 @@ app.use(
         };
       },
       res(res) {
-        return {
-          statusCode: res.statusCode,
-        };
+        return { statusCode: res.statusCode };
       },
     },
   }),
@@ -60,24 +56,23 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
     exposedHeaders: ["X-Session-Token"],
     origin(origin, callback) {
-      const isProduction = process.env["NODE_ENV"] === "production";
-
-      if (!origin || !isProduction || allowedOrigins.has(origin)) {
+      const production = process.env["NODE_ENV"] === "production";
+      if (!origin || !production || productionOrigins.has(origin)) {
         callback(null, true);
         return;
       }
-
       callback(new Error("Origin is not allowed by CORS"));
     },
   }),
 );
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
   const originalCookie = res.cookie.bind(res);
-
   res.cookie = ((name: string, value: string, options?: CookieOptions) => {
     if (name === SESSION_COOKIE_NAME && value) {
       res.setHeader("X-Session-Token", value);
@@ -86,7 +81,6 @@ app.use((_req, res, next) => {
       ? originalCookie(name, value, options)
       : originalCookie(name, value);
   }) as typeof res.cookie;
-
   next();
 });
 
@@ -109,7 +103,6 @@ function requireDashboardOwnerEmail(
     });
     return;
   }
-
   if (submittedEmail !== ownerEmail) {
     res.status(403).json({
       success: false,
@@ -117,7 +110,6 @@ function requireDashboardOwnerEmail(
     });
     return;
   }
-
   next();
 }
 
@@ -127,18 +119,18 @@ app.use(
 );
 
 app.get("/", (_req, res) => {
-  res.send("Trade Dashboard API is running");
-});
-
-app.get("/quotes", (_req, res) => {
   res.json({
-    SPY: 0,
-    QQQ: 0,
-    TSLA: 0,
-    NVDA: 0,
+    success: true,
+    service: "trade-dashboard-api",
+    data_policy: "connected-sources-only",
+    timestamp: new Date().toISOString(),
   });
 });
 
 app.use("/api", router);
+
+app.use((_req, res) => {
+  res.status(404).json({ success: false, error: "Route not found" });
+});
 
 export default app;
