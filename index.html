@@ -3,10 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="light" />
   <title>Forrest Trading Dashboard</title>
   <base href="/trade-dashboard-platform/" />
   <link rel="stylesheet" href="style.css?v=5.0" />
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    input,
+    textarea,
+    select {
+      background-color: #ffffff !important;
+      color: #2b2b2b !important;
+      -webkit-text-fill-color: #2b2b2b !important;
+      caret-color: #2b2b2b;
+      opacity: 1;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #6f6f6f !important;
+      -webkit-text-fill-color: #6f6f6f !important;
+      opacity: 1;
+    }
+
+    input:-webkit-autofill,
+    input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus {
+      -webkit-text-fill-color: #2b2b2b !important;
+      box-shadow: 0 0 0 1000px #ffffff inset !important;
+      caret-color: #2b2b2b;
+    }
+
+    #authMessage.auth-error {
+      color: #c62828;
+      font-weight: 700;
+      opacity: 1;
+    }
+
+    #authMessage.auth-success {
+      color: #148a3d;
+      font-weight: 700;
+      opacity: 1;
+    }
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -134,7 +176,7 @@
             <button id="registerBtn" type="button">Create Account</button>
             <button id="logoutBtn" type="button" hidden>Sign Out</button>
           </form>
-          <p id="authMessage" class="muted">Checking your dashboard session...</p>
+          <p id="authMessage" class="muted" role="status" aria-live="polite">Checking your dashboard session...</p>
         </section>
 
         <section class="panel">
@@ -240,6 +282,73 @@
     </main>
   </div>
 
-  <script src="script.js?v=11.0"></script>
+  <script src="script.js?v=11.1"></script>
+  <script>
+    (() => {
+      let authNotice = "";
+      let authNoticeIsError = false;
+      const baseRenderAuth = renderAuth;
+
+      function explainAuthError(error) {
+        if (error?.status === 404) {
+          return "The API deployment is outdated. Pull the latest main branch in Replit and republish the Trade Dashboard API.";
+        }
+        if (error?.status === 403) {
+          return "That email does not match DASHBOARD_OWNER_EMAIL in the Replit deployment.";
+        }
+        if (error?.status === 503) {
+          return error.message || "The API is missing a required deployment setting.";
+        }
+        return error?.message || "The dashboard account request failed.";
+      }
+
+      function paintAuthNotice() {
+        const message = document.getElementById("authMessage");
+        if (!message || !authNotice || currentUser) return;
+        message.textContent = authNotice;
+        message.className = authNoticeIsError ? "auth-error" : "auth-success";
+      }
+
+      renderAuth = function renderAuthWithPersistentNotice() {
+        baseRenderAuth();
+        paintAuthNotice();
+      };
+
+      submitAuth = async function submitAuthWithPersistentNotice(mode) {
+        if (authBusy) return;
+        const email = document.getElementById("authEmail")?.value?.trim() || "";
+        const password = document.getElementById("authPassword")?.value || "";
+
+        if (!email || password.length < 8) {
+          authNotice = "Enter the configured owner email and a password of at least eight characters.";
+          authNoticeIsError = true;
+          renderAuth();
+          return;
+        }
+
+        authNotice = mode === "register" ? "Creating the dashboard owner account..." : "Signing in...";
+        authNoticeIsError = false;
+        authBusy = true;
+        renderAuth();
+
+        try {
+          const result = await apiFetchJson(`/api/auth/${mode}`, {
+            method: "POST",
+            body: JSON.stringify({ email, password })
+          });
+          currentUser = result.data?.user || null;
+          authNotice = "";
+          setBrokerageMessage("Signed in. Brokerage connection is ready.");
+          await refreshPrivateData();
+        } catch (error) {
+          authNotice = explainAuthError(error);
+          authNoticeIsError = true;
+        } finally {
+          authBusy = false;
+          renderAuth();
+        }
+      };
+    })();
+  </script>
 </body>
 </html>
