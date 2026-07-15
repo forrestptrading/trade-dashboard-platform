@@ -40,12 +40,15 @@ jobs:
       - name: Check production JavaScript
         if: always()
         run: |
+          set -o pipefail
           node --check script.js 2>&1 | tee /tmp/javascript-check.log
           node --check scripts/audit-production-data.mjs 2>&1 | tee -a /tmp/javascript-check.log
 
       - name: Audit every repository file
         if: always()
-        run: node scripts/audit-production-data.mjs 2>&1 | tee /tmp/production-audit.log
+        run: |
+          set -o pipefail
+          node scripts/audit-production-data.mjs 2>&1 | tee /tmp/production-audit.log
 
       - name: Upload validation diagnostics
         if: always()

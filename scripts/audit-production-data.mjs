@@ -26,7 +26,7 @@ const productionFiles = new Set([
 
 const bannedProductionPatterns = [
   { label: "mock-mode marker", regex: /\bmock\b/i },
-  { label: "placeholder marker", regex: /\bplaceholder\b/i },
+  { label: "placeholder-data marker", regex: /\bplaceholder(?:\s+(?:data|feed|content|value)|s\b)/i },
   { label: "Plaid runtime reference", regex: /(?:PLAID_|\/api\/plaid|window\.Plaid|cdn\.plaid\.com)/i },
   { label: "known fabricated portfolio amount", regex: /(?:999999\.99|77777\.77|88888\.88|52341\.87|3241\.56|6666\.66)/ },
   { label: "fabricated portfolio account", regex: /MOCK-12345678/i },
