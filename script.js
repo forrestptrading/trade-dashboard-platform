@@ -1,205 +1,97 @@
+"use strict";
+
 const BACKEND_URL = "https://trade-dashboard-api--forrestpbusines.replit.app";
-
 const DEFAULT_WATCHLIST = ["AAPL", "TSLA", "NVDA", "SPY", "QQQ"];
-
 const STORAGE_KEYS = {
   watchlist: "fp_watchlist",
   journal: "fp_trade_journal",
-  approvals: "fp_trade_approvals",
-  goal: "fp_portfolio_goal"
+  goal: "fp_portfolio_goal",
+  session: "fp_dashboard_session"
 };
 
+let watchlist = loadStoredJson(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
+let journalEntries = loadStoredJson(STORAGE_KEYS.journal, []);
+let sessionToken = loadStoredText(STORAGE_KEYS.session);
+let currentUser = null;
+let portfolio = emptyPortfolio();
+let connections = [];
 let quotes = {};
-let watchlist = loadFromStorage(STORAGE_KEYS.watchlist, DEFAULT_WATCHLIST);
-let livePortfolio = null;
-let livePortfolioSource = "mock";
-let portfolioFetchStatus = "offline";
-let portfolioLastSyncAt = null;
-let aiCommandCenter = null;
-let tradeJournal = loadFromStorage(STORAGE_KEYS.journal, []);
-let approvalHistory = loadFromStorage(STORAGE_KEYS.approvals, []);
-let currentPendingIndex = 0;
-let advancedWatchlistSort = "symbol";
-let advancedWatchlistFilter = "";
-let brokerConnections = [];
-let plaidMessage = "Plaid Link is ready.";
-let plaidBusyProvider = null;
-let plaidInvestments = null;
-let brokerEngineCapabilities = {};
-let brokerEngineAdapters = [];
-let brokerEngineStatus = "loading";
-let brokerEngineLastCheckedAt = null;
-let aggregatePortfolio = null;
-let aggregatePortfolioStatus = "loading";
+let authBusy = false;
+let connectBusy = false;
 
-const sectorPerformance = [
-  { sector: "Technology", change: 1.42, breadth: "Strong" },
-  { sector: "Communication", change: 0.84, breadth: "Positive" },
-  { sector: "Financials", change: 0.31, breadth: "Mixed" },
-  { sector: "Healthcare", change: -0.18, breadth: "Mixed" },
-  { sector: "Consumer Discretionary", change: 0.67, breadth: "Positive" },
-  { sector: "Energy", change: -0.92, breadth: "Weak" },
-  { sector: "Industrials", change: 0.22, breadth: "Mixed" },
-  { sector: "Utilities", change: -0.35, breadth: "Defensive" }
-];
-
-const marketBreadth = { advancers: 318, decliners: 186, highs: 42, lows: 17 };
-
-const placeholderNews = {
-  market: [
-    { title: "Index futures steady ahead of Fed speakers", source: "Market desk", time: "Pre-market" },
-    { title: "Semiconductors lead early risk appetite", source: "Sector watch", time: "9:45 AM" },
-    { title: "Treasury yields hold near weekly range", source: "Rates desk", time: "10:15 AM" }
-  ],
-  company: [
-    { title: "NVDA supplier checks remain in focus", source: "Company feed", time: "Today" },
-    { title: "AAPL services growth preview before earnings", source: "Company feed", time: "Today" },
-    { title: "TSLA delivery expectations split analysts", source: "Company feed", time: "Today" }
-  ],
-  watchlist: [
-    { title: "SPY volume above 20-day average", source: "Watchlist alert", time: "Live placeholder" },
-    { title: "QQQ approaching prior high", source: "Watchlist alert", time: "Live placeholder" },
-    { title: "AAPL price alert placeholder armed", source: "Watchlist alert", time: "Live placeholder" }
-  ]
-};
-
-const economicEvents = [
-  { category: "Fed", title: "FOMC speaker window", date: "This week", impact: "High" },
-  { category: "CPI", title: "Consumer Price Index", date: "Next release", impact: "High" },
-  { category: "Jobs", title: "Nonfarm payrolls", date: "Friday", impact: "High" },
-  { category: "Earnings", title: "Mega-cap earnings week", date: "Upcoming", impact: "Medium" }
-];
-
-const optionsDashboardData = {
-  putCallRatio: 0.86,
-  highestIv: { ticker: "TSLA", value: "72% IV" },
-  highestVolume: { ticker: "NVDA", value: "124K contracts" },
-  unusualActivity: [
-    { ticker: "NVDA", contract: "CALL 150", expiry: "Weekly", volume: "42K", note: "Sweep placeholder" },
-    { ticker: "TSLA", contract: "PUT 250", expiry: "Monthly", volume: "31K", note: "Hedge placeholder" },
-    { ticker: "AAPL", contract: "CALL 230", expiry: "Monthly", volume: "22K", note: "Earnings placeholder" }
-  ]
-};
-
-const brokers = [
-  { id: "robinhood", name: "Robinhood" },
-  { id: "sofi", name: "SoFi" },
-  { id: "fidelity", name: "Fidelity" },
-  { id: "schwab", name: "Charles Schwab" },
-  { id: "webull", name: "Webull" }
-];
-
-const sampleOptions = [
-  {
-    ticker: "NVDA",
-    type: "CALL",
-    strike: 232.5,
-    expiration: "2026-06-19",
-    contracts: 3,
-    avgCost: 0.14,
-    current: 0.21
-  },
-  {
-    ticker: "AGQ",
-    type: "CALL",
-    strike: 125,
-    expiration: "2026-06-19",
-    contracts: 1,
-    avgCost: 0.18,
-    current: 0.31
-  },
-  {
-    ticker: "IWM",
-    type: "CALL",
-    strike: 286,
-    expiration: "2026-06-19",
-    contracts: 2,
-    avgCost: 0.09,
-    current: 0.05
-  }
-];
-
-const pendingTrades = [
-  {
-    ticker: "NVDA",
-    description: "Potential call setup. Watch momentum and volume before entry."
-  },
-  {
-    ticker: "TSLA",
-    description: "High-risk trade. Confirm trend direction before entering."
-  },
-  {
-    ticker: "SPY",
-    description: "Index play. Better for lower risk compared to single-name options."
-  },
-  {
-    ticker: "AGQ",
-    description: "Leveraged silver setup. Position sizing needs to stay small."
-  }
-];
-
-document.addEventListener("DOMContentLoaded", () => {
-  runSafely("navigation setup", setupNavigation);
-  runSafely("form setup", setupForms);
-  runSafely("button setup", setupButtons);
-  runSafely("professional workspace setup", setupProfessionalWorkspaceControls);
-
-  runSafely("initial render", renderAll);
-
-  runSafely("backend health", checkBackendHealth);
-  runSafely("quotes fetch", fetchQuotes);
-  runSafely("portfolio fetch", fetchPortfolio);
-  runSafely("broker connections fetch", fetchBrokerConnections);
-  runSafely("broker engine status fetch", fetchBrokerEngineStatus);
-  runSafely("aggregate portfolio fetch", fetchAggregatePortfolio);
-  runSafely("AI command center fetch", fetchAiCommandCenter);
-
-  setInterval(() => runSafely("quotes interval", fetchQuotes), 30000);
-  setInterval(() => runSafely("portfolio interval", fetchPortfolio), 60000);
-  setInterval(() => runSafely("AI command center interval", fetchAiCommandCenter), 30000);
-});
-
-function runSafely(label, callback) {
-  try {
-    const result = callback();
-
-    if (result && typeof result.catch === "function") {
-      result.catch((error) => console.warn(`${label} failed:`, error));
-    }
-  } catch (error) {
-    console.warn(`${label} failed:`, error);
-  }
+function emptyPortfolio() {
+  return {
+    source: "snaptrade",
+    total_value: 0,
+    cash: 0,
+    buying_power: 0,
+    invested_value: 0,
+    day_change: null,
+    day_change_percent: null,
+    accounts: [],
+    holdings: [],
+    open_positions: 0,
+    data_as_of: null,
+    retrieved_at: null,
+    data_freshness: []
+  };
 }
 
-/* STORAGE */
-
-function loadFromStorage(key, fallback) {
+function loadStoredJson(key, fallback) {
   try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 }
 
-function saveToStorage(key, value) {
+function loadStoredText(key) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error("Storage save failed:", error);
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
   }
 }
 
-/* HELPERS */
-
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
+function saveStoredJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn("Local storage write failed:", error);
+  }
 }
 
-function setClass(id, className) {
-  const el = document.getElementById(id);
-  if (el) el.className = className;
+function saveSessionToken(token) {
+  sessionToken = token || "";
+  try {
+    if (sessionToken) localStorage.setItem(STORAGE_KEYS.session, sessionToken);
+    else localStorage.removeItem(STORAGE_KEYS.session);
+  } catch (error) {
+    console.warn("Session storage write failed:", error);
+  }
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeTicker(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9.-]/g, "");
 }
 
 function escapeHtml(value) {
@@ -212,1810 +104,564 @@ function escapeHtml(value) {
 }
 
 function formatCurrency(value) {
-  const number = Number(value) || 0;
-
-  return number.toLocaleString("en-US", {
+  return finiteNumber(value).toLocaleString("en-US", {
     style: "currency",
     currency: "USD"
   });
 }
 
-function money(value) {
-  return formatCurrency(value);
+function formatNumber(value, maximumFractionDigits = 6) {
+  return finiteNumber(value).toLocaleString("en-US", { maximumFractionDigits });
 }
 
-function formatPercent(value) {
-  const number = Number(value) || 0;
-  return `${number.toFixed(2)}%`;
+function formatTimestamp(value, unavailable = "Unavailable") {
+  if (!value) return unavailable;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? unavailable : date.toLocaleString();
 }
 
-function normalizeTicker(ticker) {
-  return String(ticker || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9.-]/g, "");
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
 }
 
-function getChangeClass(value) {
-  return Number(value) >= 0 ? "positive" : "negative";
+function setStatus(id, text, connected = false) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.textContent = text;
+  element.className = `status-pill ${connected ? "status-connected" : "status-coming"}`;
 }
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-/* NAVIGATION */
-
-function setupNavigation() {
-  const navButtons = document.querySelectorAll(".nav-btn");
-  const sections = document.querySelectorAll(".page-section");
-
-  navButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const target = button.dataset.section;
-
-      navButtons.forEach((btn) => btn.classList.remove("active"));
-      sections.forEach((section) => section.classList.remove("active-section"));
-
-      button.classList.add("active");
-
-      const section = document.getElementById(target);
-      if (section) section.classList.add("active-section");
-    });
-  });
-}
-
-/* FORMS */
-
-function setupForms() {
-  const addTickerForm = document.getElementById("addTickerForm");
-  const tickerInput = document.getElementById("tickerInput");
-
-  if (addTickerForm && tickerInput) {
-    addTickerForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-
-      const ticker = normalizeTicker(tickerInput.value);
-      if (!ticker) return;
-
-      addTickerToWatchlist(ticker);
-      tickerInput.value = "";
-    });
-  }
-
-  const watchlistForm = document.getElementById("watchlistForm");
-  const watchlistInput = document.getElementById("watchlistInput");
-
-  if (watchlistForm && watchlistInput) {
-    watchlistForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-
-      const ticker = normalizeTicker(watchlistInput.value);
-      if (!ticker) return;
-
-      addTickerToWatchlist(ticker);
-      watchlistInput.value = "";
-    });
-  }
-
-  const journalForm = document.getElementById("journalForm");
-
-  if (journalForm) {
-    journalForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      saveJournalEntry();
-    });
-  }
-}
-
-/* BUTTONS */
-
-function setupButtons() {
-  const refreshQuotesBtn = document.getElementById("refreshQuotesBtn");
-
-  if (refreshQuotesBtn) {
-    refreshQuotesBtn.addEventListener("click", () => {
-      fetchQuotes();
-      fetchPortfolio();
-      fetchAggregatePortfolio();
-      fetchAiCommandCenter();
-    });
-  }
-
-  const refreshPortfolioBtn = document.getElementById("refreshPortfolioBtn");
-
-  if (refreshPortfolioBtn) {
-    refreshPortfolioBtn.addEventListener("click", () => {
-      fetchPortfolio();
-      fetchAggregatePortfolio();
-    });
-  }
-
-  const connectPlaidBtn = document.getElementById("connectPlaidBtn");
-
-  if (connectPlaidBtn) {
-    connectPlaidBtn.addEventListener("click", () => connectBroker("robinhood"));
-  }
-
-  const approveTradeBtn = document.getElementById("approveTradeBtn");
-
-  if (approveTradeBtn) {
-    approveTradeBtn.addEventListener("click", () => {
-      handleTradeApproval("Approved");
-    });
-  }
-
-  const rejectTradeBtn = document.getElementById("rejectTradeBtn");
-
-  if (rejectTradeBtn) {
-    rejectTradeBtn.addEventListener("click", () => {
-      handleTradeApproval("Rejected");
-    });
-  }
-
-  const saveGoalBtn = document.getElementById("saveGoalBtn");
-
-  if (saveGoalBtn) {
-    saveGoalBtn.addEventListener("click", savePortfolioGoal);
-  }
-
-  const enableNotificationsBtn = document.getElementById("enableNotificationsBtn");
-
-  if (enableNotificationsBtn) {
-    enableNotificationsBtn.addEventListener("click", enableNotifications);
-  }
-
-  const testNotificationBtn = document.getElementById("testNotificationBtn");
-
-  if (testNotificationBtn) {
-    testNotificationBtn.addEventListener("click", sendTestNotification);
-  }
-}
-
-/* PROFESSIONAL WORKSPACE CONTROLS */
-
-function setupProfessionalWorkspaceControls() {
-  const searchInput = document.getElementById("advancedWatchlistSearch");
-
-  if (searchInput) {
-    searchInput.addEventListener("input", (event) => {
-      advancedWatchlistFilter = event.target.value || "";
-      renderAdvancedWatchlist();
-    });
-  }
-
-  document.querySelectorAll("[data-watchlist-sort]").forEach((button) => {
-    button.addEventListener("click", () => {
-      advancedWatchlistSort = button.dataset.watchlistSort || "symbol";
-      renderAdvancedWatchlist();
-    });
-  });
-}
-
-/* MAIN RENDER */
-
-function renderAll() {
-  renderPortfolioSummary();
-  renderAggregatePortfolio();
-  renderWatchlistCards();
-  renderWatchlistTable();
-  renderAccountsList();
-  renderBrokerCards();
-  renderBrokerEngineStatus();
-  renderPlaidStatus();
-  renderPlaidInvestments();
-  renderHoldingsTable();
-  renderOptions();
-  renderRiskAnalysis();
-  renderPendingTrade();
-  renderApprovalHistory();
-  renderJournalEntries();
-  renderGoal();
-  renderAiCommandCenter();
-  renderMarketHeatMap();
-  renderAdvancedWatchlist();
-  renderNewsCenter();
-  renderEconomicCalendar();
-  renderOptionsDashboard();
-}
-
-/* BACKEND */
-
-async function checkBackendHealth() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/quotes?symbols=AAPL`);
-
-    if (!response.ok) {
-      throw new Error("Backend health failed");
-    }
-
-    setBackendStatus("Live", true);
-    setText("backendHealthStatus", "Backend is live.");
-  } catch (error) {
-    console.warn("Backend health check unavailable:", error);
-    setBackendStatus("Offline", false);
-    setText("backendHealthStatus", "Backend is offline or blocked.");
-  }
-}
-
-function setBackendStatus(status, isLive) {
-  const backendStatus = document.getElementById("backendStatus");
-
-  if (backendStatus) {
-    backendStatus.textContent = status;
-    backendStatus.className = isLive ? "positive" : "negative";
-  }
-}
-
-/* QUOTES */
-
-async function fetchQuotes() {
-  if (!watchlist.length) {
-    renderQuoteGrid();
-    renderWatchlistTable();
-    return;
-  }
-
-  try {
-    setText("quoteStatus", "Loading...");
-
-    const symbols = watchlist.join(",");
-    const response = await fetch(`${BACKEND_URL}/api/quotes?symbols=${symbols}`);
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error("Quote response failed");
-    }
-
-    const quoteList = result.data || result.quotes || [];
-
-    quotes = {};
-
-    quoteList.forEach((quote) => {
-      const symbol = normalizeTicker(quote.symbol || quote.ticker);
-
-      if (symbol) {
-        quotes[symbol] = quote;
-      }
-    });
-
-    setBackendStatus("Live", true);
-    setText("quoteStatus", `Live (${result.source || "backend"})`);
-    setText("lastQuoteUpdate", new Date().toLocaleTimeString());
-
-    renderQuoteGrid();
-    renderWatchlistTable();
-    renderAdvancedWatchlist();
-    renderHoldingsTable();
-  } catch (error) {
-    console.warn("Quote fetch unavailable:", error);
-
-    setBackendStatus("Offline", false);
-    setText("quoteStatus", "Quotes failed");
-
-    renderQuoteGrid();
-    renderWatchlistTable();
-    renderAdvancedWatchlist();
-  }
-}
-
-function getQuotePrice(quote) {
-  return Number(
-    quote?.price ||
-    quote?.last_price ||
-    quote?.mark_price ||
-    quote?.lastTradePrice ||
-    quote?.regularMarketPrice ||
-    0
-  );
-}
-
-function getQuoteChange(quote) {
-  return Number(
-    quote?.change ||
-    quote?.price_change ||
-    quote?.regularMarketChange ||
-    0
-  );
-}
-
-function getQuotePercent(quote) {
-  return Number(
-    quote?.changePercent ||
-    quote?.change_percent ||
-    quote?.regularMarketChangePercent ||
-    0
-  );
-}
-
-/* PORTFOLIO */
-
-async function fetchPortfolio() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/portfolio`);
-
-    if (!response.ok) {
-      throw new Error(`Portfolio request failed with ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (!result.success || !result.data || typeof result.data !== "object") {
-      throw new Error("Portfolio response missing success/data");
-    }
-
-    livePortfolio = result.data;
-    livePortfolioSource = normalizePortfolioSource(result.source || result.data.source);
-    portfolioFetchStatus = livePortfolioSource === "robinhood" ? "live" : "mock";
-    portfolioLastSyncAt = new Date();
-
-    setBackendStatus("Live", true);
-
-    renderPortfolioSummary();
-    renderAccountsList();
-    renderHoldingsTable();
-  } catch (error) {
-    console.warn("Portfolio fetch unavailable; keeping last data or mock fallback:", error);
-
-    portfolioFetchStatus = "offline";
-
-    if (!livePortfolio) {
-      livePortfolioSource = "mock";
-    }
-
-    renderPortfolioSummary();
-    renderAccountsList();
-    renderHoldingsTable();
-  }
-}
-
-function normalizePortfolioSource(source) {
-  const normalized = String(source || "mock").trim().toLowerCase();
-
-  if (normalized === "robinhood") return "robinhood";
-
-  return "mock";
-}
-
-function getPortfolioSourceLabel() {
-  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
-    return "robinhood/live";
-  }
-
-  if (portfolioFetchStatus === "mock") {
-    return "mock/mode";
-  }
-
-  return "offline";
-}
-
-function getPortfolioConnectionLabel() {
-  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
-    return "Robinhood Connected";
-  }
-
-  if (portfolioFetchStatus === "mock") {
-    return "Mock Mode";
-  }
-
-  return "Offline";
-}
-
-function getPortfolioDataSourceLabel() {
-  if (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
-    return "Live Data Source: Robinhood";
-  }
-
-  if (portfolioFetchStatus === "mock") {
-    return "Live Data Source: Mock";
-  }
-
-  return "Live Data Source: Offline";
-}
-
-function getLastSyncLabel() {
-  if (!portfolioLastSyncAt) return "Last sync: never";
-
-  return `Last sync: ${portfolioLastSyncAt.toLocaleTimeString()}`;
-}
-
-function getPortfolioValue(keyList, fallback = 0, useFallbackWhenLive = false) {
-  if (!livePortfolio) return fallback;
-
-  for (const key of keyList) {
-    if (livePortfolio[key] !== undefined && livePortfolio[key] !== null) {
-      return Number(livePortfolio[key]) || 0;
-    }
-  }
-
-  return useFallbackWhenLive ? fallback : 0;
-}
-
-function getLiveHoldings() {
-  if (!livePortfolio) return [];
-
-  return safeArray(
-    livePortfolio.holdings ||
-    livePortfolio.positions ||
-    livePortfolio.securities ||
-    livePortfolio.accounts?.[0]?.holdings ||
-    livePortfolio.accounts?.[0]?.positions ||
-    livePortfolio.account?.holdings ||
-    livePortfolio.account?.positions ||
-    []
-  );
-}
-
-function renderPortfolioSummary() {
-  const totalValue = getPortfolioValue(
-    ["total_value", "totalValue", "total", "balance", "equity", "account_value"],
-    52341.87
-  );
-
-  const buyingPower = getPortfolioValue(
-    ["buying_power", "buyingPower", "available_buying_power"],
-    3241.56
-  );
-
-  const cash = getPortfolioValue(
-    ["cash", "cash_balance", "cashBalance", "cash_available"],
-    3241.56
-  );
-
-  const investedValue = getPortfolioValue(
-    ["invested_value", "investedValue", "market_value", "marketValue"],
-    totalValue - cash,
-    true
-  );
-
-  const dayChange = getPortfolioValue(
-    ["day_change", "dailyChange", "dayChange"],
-    412.34
-  );
-
-  const dayChangePercent = getPortfolioValue(
-    ["day_change_percent", "dailyPercent", "dayChangePercent"],
-    0.79
-  );
-
-  const holdings = getLiveHoldings();
-
-  setText("portfolioValue", formatCurrency(totalValue));
-  setText("buyingPower", formatCurrency(buyingPower));
-  setText("cash", formatCurrency(cash));
-  setText("dailyPL", formatCurrency(dayChange));
-  setText("dailyPercent", formatPercent(dayChangePercent));
-  setText("openPositions", holdings.length || livePortfolio?.open_positions || 4);
-  const accountCount = safeArray(livePortfolio?.accounts).length || (livePortfolio?.account_number ? 1 : 0);
-
-  setText("accountCount", livePortfolioSource === "robinhood" ? `${accountCount || 1} account connected` : "mock fallback");
-  setText("portfolioSource", getPortfolioSourceLabel());
-  setText("portfolioConnectionStatus", getPortfolioConnectionLabel());
-  setText("portfolioLastSync", getLastSyncLabel());
-  setText("portfolioDataSource", getPortfolioDataSourceLabel());
-
-  setClass("dailyPL", getChangeClass(dayChange));
-  setClass("dailyPercent", getChangeClass(dayChange));
-
-  setText("investedValue", formatCurrency(investedValue));
-}
-
-/* PLAID / BROKER CONNECTIONS */
 
 async function apiFetchJson(path, options = {}) {
+  const headers = {
+    Accept: "application/json",
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...(options.headers || {})
+  };
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+
   const response = await fetch(`${BACKEND_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options
+    credentials: "include",
+    cache: "no-store",
+    ...options,
+    headers
   });
 
+  const issuedToken = response.headers.get("X-Session-Token");
+  if (issuedToken) saveSessionToken(issuedToken);
+
   const result = await response.json().catch(() => null);
-
   if (!response.ok || !result) {
-    throw new Error(result?.error || `Request failed with ${response.status}`);
+    const error = new Error(result?.error || `Request failed with HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
-
   return result;
 }
 
-function getBrokerConnection(provider) {
-  return brokerConnections.find((connection) => connection.provider === provider);
-}
-
-function formatConnectionSync(value) {
-  if (!value) return "Last Sync: never";
-
-  return `Last Sync: ${new Date(value).toLocaleString()}`;
-}
-
-function setPlaidStatus(message, isError = false) {
-  plaidMessage = message;
-
-  const statusBox = document.getElementById("plaidStatusMessage");
-  if (!statusBox) return;
-
-  statusBox.textContent = message;
-  statusBox.className = `plaid-status ${isError ? "negative" : "muted"}`;
-}
-
-function renderPlaidStatus() {
-  const normalizedMessage = plaidMessage.toLowerCase();
-  setPlaidStatus(
-    plaidMessage,
-    normalizedMessage.includes("failed") ||
-      normalizedMessage.includes("unavailable") ||
-      normalizedMessage.includes("error")
-  );
-}
-
-function renderPlaidInvestments() {
-  const summaryEl = document.getElementById("plaidInvestmentSummary");
-  if (!summaryEl) return;
-
-  if (!plaidInvestments) {
-    summaryEl.textContent = "";
-    summaryEl.className = "plaid-investment-summary muted";
-    return;
-  }
-
-  const accounts = safeArray(plaidInvestments.accounts);
-  const holdings = safeArray(plaidInvestments.holdings);
-  const securities = safeArray(plaidInvestments.securities);
-
-  if (!accounts.length && !holdings.length && !securities.length) {
-    summaryEl.textContent = "Plaid connected, but no investment holdings were found for this institution.";
-    summaryEl.className = "plaid-investment-summary muted";
-    return;
-  }
-
-  const holdingsLabel = holdings.length === 1 ? "holding" : "holdings";
-  const accountsLabel = accounts.length === 1 ? "account" : "accounts";
-  const securitiesLabel = securities.length === 1 ? "security" : "securities";
-
-  summaryEl.textContent = `Plaid investments loaded: ${accounts.length} ${accountsLabel}, ${holdings.length} ${holdingsLabel}, ${securities.length} ${securitiesLabel}.`;
-  summaryEl.className = "plaid-investment-summary status-connected";
-}
-
-async function fetchBrokerConnections() {
-  try {
-    const result = await apiFetchJson("/api/broker-connections");
-
-    brokerConnections = safeArray(result.data);
-    renderAccountsList();
-    renderBrokerCards();
-    renderPlaidStatus();
-  } catch (error) {
-    console.warn("Broker connections unavailable:", error);
-    setPlaidStatus("Broker connections are unavailable. Portfolio fallback remains active.", true);
-  }
-}
-
-async function fetchBrokerEngineStatus() {
-  try {
-    brokerEngineStatus = "loading";
-    renderBrokerEngineStatus();
-
-    const [capabilitiesResult, adaptersResult] = await Promise.all([
-      apiFetchJson("/api/broker-engine/capabilities"),
-      apiFetchJson("/api/broker-engine/adapters")
-    ]);
-
-    brokerEngineCapabilities = capabilitiesResult.data || {};
-    brokerEngineAdapters = safeArray(adaptersResult.data);
-    brokerEngineStatus = "live";
-    brokerEngineLastCheckedAt = new Date();
-  } catch (error) {
-    console.warn("Broker Engine status unavailable:", error);
-    brokerEngineStatus = "offline";
-    brokerEngineAdapters = [];
-  } finally {
-    renderBrokerEngineStatus();
-  }
-}
-
-async function fetchAggregatePortfolio() {
-  try {
-    aggregatePortfolioStatus = "loading";
-    renderAggregatePortfolio();
-
-    const result = await apiFetchJson("/api/broker-engine/aggregate");
-
-    aggregatePortfolio = result.data || null;
-    aggregatePortfolioStatus = "live";
-  } catch (error) {
-    console.warn("Aggregate portfolio unavailable:", error);
-    aggregatePortfolioStatus = "offline";
-  } finally {
-    renderAggregatePortfolio();
-  }
-}
-
-async function createBrokerConnection(provider) {
-  const result = await apiFetchJson("/api/broker-connections", {
-    method: "POST",
-    body: JSON.stringify({ provider })
-  });
-
-  return result.data;
-}
-
-async function createPlaidLinkToken(provider) {
-  try {
-    return await apiFetchJson("/api/plaid/create_link_token", {
-      method: "POST",
-      body: JSON.stringify({})
+function setupNavigation() {
+  const buttons = document.querySelectorAll(".nav-btn");
+  const sections = document.querySelectorAll(".page-section");
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      buttons.forEach((item) => item.classList.remove("active"));
+      sections.forEach((section) => section.classList.remove("active-section"));
+      button.classList.add("active");
+      document.getElementById(button.dataset.section)?.classList.add("active-section");
     });
-  } catch (error) {
-    console.warn("Direct Plaid Link token endpoint unavailable, trying legacy endpoint:", error);
-    return apiFetchJson("/api/plaid/create-link-token", {
-      method: "POST",
-      body: JSON.stringify({ provider })
-    });
-  }
-}
-
-async function exchangePlaidPublicToken(provider, publicToken) {
-  try {
-    return await apiFetchJson("/api/plaid/exchange_public_token", {
-      method: "POST",
-      body: JSON.stringify({ public_token: publicToken })
-    });
-  } catch (error) {
-    console.warn("Direct Plaid token exchange endpoint unavailable, trying legacy endpoint:", error);
-    return apiFetchJson("/api/plaid/exchange-public-token", {
-      method: "POST",
-      body: JSON.stringify({ provider, public_token: publicToken })
-    });
-  }
-}
-
-async function fetchPlaidInvestments() {
-  const result = await apiFetchJson("/api/plaid/investments");
-
-  plaidInvestments = {
-    accounts: safeArray(result.accounts),
-    holdings: safeArray(result.holdings),
-    securities: safeArray(result.securities)
-  };
-
-  renderPlaidInvestments();
-
-  return plaidInvestments;
-}
-
-function loadPlaidSdk() {
-  if (window.Plaid) return Promise.resolve(true);
-
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]');
-
-    if (existing) {
-      existing.addEventListener("load", () => resolve(true), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Plaid Link failed to load")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => reject(new Error("Plaid Link failed to load"));
-    document.body.appendChild(script);
   });
 }
 
-function getSafePlaidExitDetails(error, metadata) {
-  const institution = metadata?.institution || {};
+function setupFormsAndButtons() {
+  document.getElementById("addTickerForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = document.getElementById("tickerInput");
+    const symbol = normalizeTicker(input?.value);
+    if (!symbol || watchlist.includes(symbol)) return;
+    watchlist.push(symbol);
+    saveStoredJson(STORAGE_KEYS.watchlist, watchlist);
+    if (input) input.value = "";
+    fetchQuotes();
+  });
 
-  return {
-    error_code: error?.error_code || error?.errorCode || null,
-    error_message: error?.error_message || error?.errorMessage || error?.message || null,
-    display_message: error?.display_message || error?.displayMessage || null,
-    status: metadata?.status || null,
-    institution_name: institution.name || null,
-    link_session_id: metadata?.link_session_id || metadata?.linkSessionId || null
-  };
+  document.getElementById("authForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAuth("login");
+  });
+  document.getElementById("registerBtn")?.addEventListener("click", () => submitAuth("register"));
+  document.getElementById("logoutBtn")?.addEventListener("click", logout);
+  document.getElementById("connectBrokerageBtn")?.addEventListener("click", connectBrokerage);
+  document.getElementById("refreshDataBtn")?.addEventListener("click", refreshAllData);
+  document.getElementById("saveGoalBtn")?.addEventListener("click", saveGoal);
+
+  document.getElementById("journalForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const ticker = normalizeTicker(document.getElementById("journalTicker")?.value);
+    const strategy = document.getElementById("journalStrategy")?.value?.trim() || "";
+    const result = document.getElementById("journalResult")?.value?.trim() || "";
+    if (!ticker && !strategy && !result) return;
+    journalEntries.unshift({ ticker, strategy, result, created_at: new Date().toISOString() });
+    saveStoredJson(STORAGE_KEYS.journal, journalEntries);
+    event.target.reset();
+    renderJournal();
+  });
 }
 
-function formatPlaidExitReason(details) {
-  const reasonParts = [
-    details.display_message,
-    details.error_message,
-    details.error_code,
-    details.status,
-    details.institution_name ? `institution: ${details.institution_name}` : null,
-    details.link_session_id ? `session: ${details.link_session_id}` : null
-  ].filter(Boolean);
-
-  return reasonParts.length ? reasonParts.join(" | ") : "user closed Plaid Link before completing connection";
-}
-
-function getPlaidExitMessage(error, metadata) {
-  const details = getSafePlaidExitDetails(error, metadata);
-  const code = details.error_code || "";
-
-  if (code.includes("INVALID_LINK_TOKEN")) {
-    return `Plaid exited before connection: Plaid Link token expired. ${formatPlaidExitReason(details)}`;
-  }
-
-  if (code.includes("INSTITUTION") || code.includes("ITEM_LOGIN_REQUIRED")) {
-    return `Plaid exited before connection: Plaid institution is unavailable. ${formatPlaidExitReason(details)}`;
-  }
-
-  return `Plaid exited before connection: ${formatPlaidExitReason(details)}`;
-}
-
-function handlePlaidExit(error, metadata) {
-  const details = getSafePlaidExitDetails(error, metadata);
-  console.warn("Plaid Link exited before completion:", details);
-
-  plaidBusyProvider = null;
-  setPlaidStatus(getPlaidExitMessage(error, metadata), Boolean(error));
-  renderBrokerCards();
-}
-
-async function handlePlaidSuccess(provider, publicToken) {
-  console.info("Plaid onSuccess callback fired.");
-  setPlaidStatus("Plaid success received. Exchanging token...");
-  renderBrokerCards();
-
+async function checkBackendHealth() {
   try {
-    setPlaidStatus("Exchanging Plaid token with backend...");
-    await exchangePlaidPublicToken(provider, publicToken);
-    setPlaidStatus("Plaid connected successfully. Loading investment holdings...");
-
-    try {
-      const investments = await fetchPlaidInvestments();
-      const holdingCount = safeArray(investments.holdings).length;
-      const accountCount = safeArray(investments.accounts).length;
-
-      if (holdingCount || accountCount) {
-        setPlaidStatus("Plaid connected successfully. Investment data loaded.");
-      } else {
-        setPlaidStatus("Plaid connected successfully. No investment holdings found.");
-      }
-    } catch (investmentError) {
-      console.warn("Plaid investments fetch failed:", investmentError);
-      plaidInvestments = null;
-      renderPlaidInvestments();
-      setPlaidStatus("Plaid connected, but investment holdings are not available yet.", true);
-    }
-
-    await fetchBrokerConnections();
-    await fetchPortfolio();
-    await fetchAggregatePortfolio();
+    const result = await apiFetchJson("/api/health");
+    setText("backendStatus", "Live");
+    document.getElementById("backendStatus")?.classList.add("positive");
+    setText("backendHealthStatus", `API is live. Checked ${formatTimestamp(result.timestamp)}.`);
   } catch (error) {
-    console.warn("Plaid public token exchange failed:", error);
-    setPlaidStatus("Plaid error: token exchange failed. Please reconnect.", true);
-  } finally {
-    plaidBusyProvider = null;
-    renderBrokerCards();
+    setText("backendStatus", "Offline");
+    document.getElementById("backendStatus")?.classList.add("negative");
+    setText("backendHealthStatus", `API unavailable: ${error.message}`);
   }
 }
 
-async function connectWithPlaid(provider) {
-  if (plaidBusyProvider) {
-    setPlaidStatus("Plaid Link is already opening. Please finish or close the current session.");
-    return;
-  }
-
-  plaidBusyProvider = provider;
-  setPlaidStatus("Opening Plaid. Requesting Plaid Link token...");
-  renderBrokerCards();
-
+async function checkAuth() {
   try {
-    const tokenResponse = await createPlaidLinkToken(provider);
-
-    if (tokenResponse.configured === false || !tokenResponse.link_token) {
-      setPlaidStatus(tokenResponse.message || "Plaid is not configured. Creating a demo broker connection.");
-      await createBrokerConnection(provider);
-      await fetchBrokerConnections();
-      await fetchPortfolio();
-      plaidBusyProvider = null;
-      setPlaidStatus("Demo broker connection created. Portfolio refreshed.");
-      renderBrokerCards();
-      return;
-    }
-
-    await loadPlaidSdk();
-    setPlaidStatus("Opening Plaid Link. Complete the secure bank connection window.");
-
-    if (!window.Plaid) {
-      throw new Error("Plaid Link SDK unavailable");
-    }
-
-    const handler = window.Plaid.create({
-      token: tokenResponse.link_token,
-      onSuccess: (publicToken) => handlePlaidSuccess(provider, publicToken),
-      onExit: handlePlaidExit
-    });
-
-    handler.open();
-  } catch (error) {
-    console.warn("Plaid connection failed:", error);
-    plaidBusyProvider = null;
-    setPlaidStatus("Plaid backend or Link SDK is unavailable. Please try again later.", true);
-    renderBrokerCards();
+    const result = await apiFetchJson("/api/auth/me");
+    currentUser = result.data?.user || null;
+  } catch {
+    currentUser = null;
+    if (sessionToken) saveSessionToken("");
   }
+  renderAuth();
 }
 
-/* ACCOUNTS */
-
-function renderAggregatePortfolio() {
-  const statusEl = document.getElementById("aggregatePortfolioStatus");
-  if (!statusEl) return;
-
-  const isLive = aggregatePortfolioStatus === "live";
-  const isOffline = aggregatePortfolioStatus === "offline";
-
-  statusEl.textContent = isLive ? "Live" : isOffline ? "Offline" : "Loading";
-  statusEl.className = `status-pill ${isLive ? "status-connected" : isOffline ? "status-disconnected" : "status-coming"}`;
-
-  const syncStatus = aggregatePortfolio?.sync_status || {};
-  const includedBrokers = safeArray(syncStatus.included_brokers);
-  const skippedBrokers = safeArray(syncStatus.skipped_brokers);
-
-  setText("aggregateTotalValue", formatCurrency(aggregatePortfolio?.total_value));
-  setText("aggregateCash", formatCurrency(aggregatePortfolio?.cash));
-  setText("aggregateBuyingPower", formatCurrency(aggregatePortfolio?.buying_power));
-  setText("aggregateInvestedValue", formatCurrency(aggregatePortfolio?.invested_value));
-  setText("aggregateIncludedBrokers", includedBrokers.length ? includedBrokers.join(", ") : "none");
-  setText("aggregateSkippedBrokers", String(skippedBrokers.length || 0));
+function renderAuth() {
+  const signedIn = Boolean(currentUser);
+  setStatus("authStatus", signedIn ? "Signed In" : authBusy ? "Working" : "Signed Out", signedIn);
   setText(
-    "aggregateSyncStatus",
-    isOffline ? "offline" : syncStatus.state || aggregatePortfolioStatus
+    "authMessage",
+    signedIn ? `Signed in as ${currentUser.email}.` : "Use the owner email configured in the API environment."
   );
+
+  ["authEmail", "authPassword", "loginBtn", "registerBtn"].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) element.hidden = signedIn;
+  });
+  const logoutButton = document.getElementById("logoutBtn");
+  if (logoutButton) logoutButton.hidden = !signedIn;
+  const connectButton = document.getElementById("connectBrokerageBtn");
+  if (connectButton) connectButton.disabled = !signedIn || connectBusy;
 }
 
-function renderAccountsList() {
-  const accountsList = document.getElementById("accountsList");
-
-  if (!accountsList) return;
-
-  if (brokerConnections.length) {
-    const connected = brokerConnections.filter((connection) => connection.status === "connected");
-    const totalBalance = connected.reduce((sum, connection) => sum + Number(connection.balance || 0), 0);
-    const totalBuyingPower = connected.reduce((sum, connection) => sum + Number(connection.buying_power || 0), 0);
-
-    accountsList.innerHTML = `
-      <article class="account-card">
-        <h4>Connected Accounts</h4>
-        <span class="status-pill status-connected">Connected</span>
-        <p>Account Count: <strong>${connected.length}</strong></p>
-        <p>Balance: <strong>${formatCurrency(totalBalance)}</strong></p>
-        <p>Buying Power: <strong>${formatCurrency(totalBuyingPower)}</strong></p>
-      </article>
-      ${brokerConnections.map((connection) => {
-        return `
-          <article class="account-card">
-            <h4>${connection.name}</h4>
-            <span class="status-pill ${connection.status === "connected" ? "status-connected" : "status-coming"}">
-              ${connection.status === "connected" ? "Connected" : connection.status}
-            </span>
-            <p>Institution Name: <strong>${connection.name}</strong></p>
-            <p>Account Count: <strong>1</strong></p>
-            <p>${formatConnectionSync(connection.last_connected)}</p>
-            <p>Balance: <strong>${formatCurrency(connection.balance)}</strong></p>
-            <p>Buying Power: <strong>${formatCurrency(connection.buying_power)}</strong></p>
-          </article>
-        `;
-      }).join("")}
-    `;
-
+async function submitAuth(mode) {
+  if (authBusy) return;
+  const email = document.getElementById("authEmail")?.value?.trim() || "";
+  const password = document.getElementById("authPassword")?.value || "";
+  if (!email || password.length < 8) {
+    setText("authMessage", "Enter the configured owner email and a password of at least eight characters.");
     return;
   }
 
-  if (livePortfolio) {
-    const accountName = livePortfolio.account_name || livePortfolio.broker || (livePortfolioSource === "robinhood" ? "Robinhood" : "Mock Portfolio");
-    const totalValue = getPortfolioValue(["total_value", "totalValue", "total", "balance", "equity", "account_value"]);
-    const buyingPower = getPortfolioValue(["buying_power", "buyingPower", "available_buying_power"]);
-    const cash = getPortfolioValue(["cash", "cash_balance", "cashBalance", "cash_available"]);
+  authBusy = true;
+  renderAuth();
+  try {
+    const result = await apiFetchJson(`/api/auth/${mode}`, {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+    currentUser = result.data?.user || null;
+    setBrokerageMessage("Signed in. Brokerage connection is ready.");
+    await refreshPrivateData();
+  } catch (error) {
+    setText("authMessage", error.message);
+  } finally {
+    authBusy = false;
+    renderAuth();
+  }
+}
 
-    accountsList.innerHTML = `
-      <article class="account-card">
-        <h4>${accountName}</h4>
+async function logout() {
+  try {
+    await apiFetchJson("/api/snaptrade/logout", { method: "POST", body: "{}" });
+  } catch (error) {
+    console.warn("Logout request failed:", error);
+  }
+  saveSessionToken("");
+  currentUser = null;
+  portfolio = emptyPortfolio();
+  connections = [];
+  renderAuth();
+  renderPortfolio();
+  renderAccounts();
+  renderConnections();
+  renderHoldings();
+  renderOptions();
+  setBrokerageMessage("Signed out. Private brokerage data is hidden.");
+}
 
-        <span class="status-pill ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "status-connected" : "status-coming"}">
-          ${portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" ? "Connected" : getPortfolioConnectionLabel()}
-        </span>
+function setBrokerageMessage(message, error = false) {
+  const element = document.getElementById("brokerageStatusMessage");
+  if (!element) return;
+  element.textContent = message;
+  element.className = `plaid-status ${error ? "negative" : "muted"}`;
+}
 
-        <p>Institution Name: <strong>${accountName}</strong></p>
-        <p>Account Count: <strong>${livePortfolio?.account_number ? 1 : 0}</strong></p>
-        <p>Balance: <strong>${formatCurrency(totalValue)}</strong></p>
-        <p>Buying Power: <strong>${formatCurrency(buyingPower)}</strong></p>
-        <p>Cash: <strong>${formatCurrency(cash)}</strong></p>
-      </article>
-    `;
-
+async function checkSnapTradeConfig() {
+  if (!currentUser) {
+    setText("snapTradeConfigStatus", "SnapTrade configuration is checked after sign-in.");
     return;
   }
+  try {
+    const result = await apiFetchJson("/api/snaptrade/config-check");
+    setText(
+      "snapTradeConfigStatus",
+      result.configured ? "SnapTrade Personal credentials are configured." : "SnapTrade credentials are missing."
+    );
+  } catch (error) {
+    setText("snapTradeConfigStatus", `SnapTrade configuration check failed: ${error.message}`);
+  }
+}
 
-  accountsList.innerHTML = brokers.map((broker) => {
+async function connectBrokerage() {
+  if (!currentUser || connectBusy) return;
+  connectBusy = true;
+  renderAuth();
+  setBrokerageMessage("Requesting a secure SnapTrade connection link...");
+  try {
+    const result = await apiFetchJson("/api/snaptrade/connect", {
+      method: "POST",
+      body: "{}"
+    });
+    if (!result.redirect_uri) throw new Error("SnapTrade did not return a connection link");
+    window.location.assign(result.redirect_uri);
+  } catch (error) {
+    connectBusy = false;
+    renderAuth();
+    setBrokerageMessage(error.message, true);
+  }
+}
+
+function unwrapConnectionName(connection) {
+  const brokerage = connection?.brokerage || connection?.broker || {};
+  return brokerage.name || connection?.name || connection?.brokerage_name || "Brokerage";
+}
+
+async function fetchConnections() {
+  if (!currentUser) {
+    connections = [];
+    renderConnections();
+    return;
+  }
+  try {
+    const result = await apiFetchJson("/api/snaptrade/connections");
+    connections = safeArray(result.data);
+  } catch (error) {
+    connections = [];
+    setBrokerageMessage(`Connections unavailable: ${error.message}`, true);
+  }
+  renderConnections();
+}
+
+async function fetchPortfolio() {
+  if (!currentUser) {
+    portfolio = emptyPortfolio();
+    renderAllPortfolioViews();
+    return;
+  }
+  try {
+    const result = await apiFetchJson("/api/snaptrade/portfolio");
+    if (result.source !== "snaptrade" || !result.data) {
+      throw new Error("The API did not return a verified SnapTrade portfolio");
+    }
+    portfolio = {
+      ...emptyPortfolio(),
+      ...result.data,
+      accounts: safeArray(result.data.accounts),
+      holdings: safeArray(result.data.holdings),
+      data_freshness: safeArray(result.data.data_freshness)
+    };
+    setBrokerageMessage(
+      portfolio.accounts.length
+        ? "Connected brokerage data loaded."
+        : "SnapTrade is connected, but no investment accounts were returned."
+    );
+  } catch (error) {
+    portfolio = emptyPortfolio();
+    setBrokerageMessage(`Portfolio unavailable: ${error.message}`, true);
+  }
+  renderAllPortfolioViews();
+}
+
+function renderAllPortfolioViews() {
+  renderPortfolio();
+  renderAccounts();
+  renderHoldings();
+  renderOptions();
+}
+
+function renderPortfolio() {
+  const accounts = safeArray(portfolio.accounts);
+  const holdings = safeArray(portfolio.holdings).filter((holding) => !holding.cash_equivalent);
+  const connected = accounts.length > 0;
+  const dayChange = optionalFiniteNumber(portfolio.day_change);
+  const dayPercent = optionalFiniteNumber(portfolio.day_change_percent);
+
+  setText("portfolioValue", formatCurrency(portfolio.total_value));
+  setText("buyingPower", formatCurrency(portfolio.buying_power));
+  setText("cash", formatCurrency(portfolio.cash));
+  setText("investedValue", formatCurrency(portfolio.invested_value));
+  setText("dailyPL", dayChange === null ? "--" : formatCurrency(dayChange));
+  setText("dailyPercent", dayPercent === null ? "Not supplied by brokerage feed" : `${dayPercent.toFixed(2)}%`);
+  setText("openPositions", String(holdings.length));
+  setText("accountCount", `${accounts.length} account${accounts.length === 1 ? "" : "s"} connected`);
+  setText("portfolioSource", connected ? "SnapTrade connected data" : "SnapTrade not connected");
+  setText("portfolioConnectionStatus", connected ? "Connected" : "Not Connected");
+  setText("portfolioLastSync", `Data as of: ${formatTimestamp(portfolio.data_as_of, "Unavailable")}`);
+  setText("portfolioDataSource", "Source: SnapTrade Personal");
+  setText("dataFreshnessStatus", connected ? portfolio.freshness_label || "Reported" : "Unavailable");
+  setText("dataRetrievedAt", `Retrieved: ${formatTimestamp(portfolio.retrieved_at, "Never")}`);
+}
+
+function renderAccounts() {
+  const element = document.getElementById("accountsList");
+  if (!element) return;
+  const accounts = safeArray(portfolio.accounts);
+  if (!currentUser) {
+    element.innerHTML = '<article class="account-card"><h4>Private Portfolio</h4><span class="status-pill status-coming">Sign In Required</span><p class="muted">Sign in to view connected investment accounts.</p></article>';
+    return;
+  }
+  if (!accounts.length) {
+    element.innerHTML = '<article class="account-card"><h4>No Account Connected</h4><span class="status-pill status-coming">SnapTrade Ready</span><p class="muted">Use Connect Brokerage to link an investment account.</p></article>';
+    return;
+  }
+  element.innerHTML = accounts.map((account) => {
+    const number = String(account.account_number || "").replace(/\s+/g, "");
+    const masked = number ? `•••• ${number.slice(-4)}` : "Hidden";
     return `
       <article class="account-card">
-        <h4>${broker.name}</h4>
-
-        <span class="status-pill status-disconnected">
-          Not Connected
-        </span>
-
-        <p>Institution Name: <strong>${broker.name}</strong></p>
-        <p>Account Count: <strong>0</strong></p>
-        <p>Balance: <strong>$0.00</strong></p>
-        <p>Buying Power: <strong>$0.00</strong></p>
-      </article>
-    `;
+        <h4>${escapeHtml(account.name || "Investment Account")}</h4>
+        <span class="status-pill status-connected">Connected</span>
+        <p>Account: <strong>${escapeHtml(masked)}</strong></p>
+        <p>Total Value: <strong>${formatCurrency(account.total_value)}</strong></p>
+        <p>Cash: <strong>${formatCurrency(account.cash)}</strong></p>
+        <p>Buying Power: <strong>${formatCurrency(account.buying_power)}</strong></p>
+        <p class="muted">Data as of: ${escapeHtml(formatTimestamp(account.data_as_of))}</p>
+      </article>`;
   }).join("");
 }
 
-function renderBrokerCards() {
-  const brokerCards = document.getElementById("brokerCards");
-
-  if (!brokerCards) return;
-
-  brokerCards.innerHTML = brokers.map((broker) => {
-    const connection = getBrokerConnection(broker.id);
-    const connected =
-      connection?.status === "connected" ||
-      (portfolioFetchStatus === "live" && livePortfolioSource === "robinhood" && broker.id === "robinhood");
-    const isBusy = plaidBusyProvider === broker.id;
-
+function renderConnections() {
+  const element = document.getElementById("brokerConnections");
+  if (!element) return;
+  if (!currentUser) {
+    element.innerHTML = '<article class="broker-card"><h4>SnapTrade</h4><span class="status-pill status-coming">Sign In Required</span></article>';
+    return;
+  }
+  if (!connections.length) {
+    element.innerHTML = '<article class="broker-card"><h4>SnapTrade</h4><span class="status-pill status-coming">No Connection</span><p class="muted">No brokerage authorization has been returned.</p></article>';
+    return;
+  }
+  element.innerHTML = connections.map((connection) => {
+    const disabled = Boolean(connection.disabled) || String(connection.status || "").toLowerCase() === "disabled";
     return `
       <article class="broker-card">
-        <h4>${connection?.name || broker.name}</h4>
-
-        <span class="status-pill ${connected ? "status-connected" : isBusy ? "status-coming" : "status-coming"}">
-          ${connected ? "Connected" : isBusy ? "Connecting..." : "Plaid Ready"}
-        </span>
-
-        <p>Institution Name: <strong>${connection?.name || broker.name}</strong></p>
-        <p>Account Count: <strong>${connection ? 1 : 0}</strong></p>
-        <p class="muted">${formatConnectionSync(connection?.last_connected)}</p>
-        <p class="muted">
-          Secure account linking runs through Plaid Link.
-        </p>
-
-        <button onclick="connectBroker('${broker.id}')" ${isBusy ? "disabled" : ""}>
-          ${connected ? "Sync Account" : isBusy ? "Connecting..." : "Connect"}
-        </button>
-      </article>
-    `;
+        <h4>${escapeHtml(unwrapConnectionName(connection))}</h4>
+        <span class="status-pill ${disabled ? "status-coming" : "status-connected"}">${disabled ? "Needs Attention" : "Connected"}</span>
+        <p class="muted">Connection ID: ${escapeHtml(String(connection.id || connection.authorization_id || "Unavailable").slice(0, 12))}</p>
+      </article>`;
   }).join("");
 }
 
-function formatCapability(value) {
-  return value ? "Yes" : "No";
+function isOptionHolding(holding) {
+  const kind = String(holding.asset_type || holding.type || holding.instrument_type || "").toLowerCase();
+  return kind.includes("option") || Boolean(holding.option_symbol);
 }
 
-function renderBrokerEngineStatus() {
-  const statusEl = document.getElementById("brokerEngineStatus");
-  const updatedAtEl = document.getElementById("brokerEngineUpdatedAt");
-  const adaptersEl = document.getElementById("brokerEngineAdapters");
-
-  if (!statusEl || !updatedAtEl || !adaptersEl) return;
-
-  const isLive = brokerEngineStatus === "live";
-  const isOffline = brokerEngineStatus === "offline";
-
-  statusEl.textContent = isLive ? "Live" : isOffline ? "Offline" : "Loading";
-  statusEl.className = `status-pill ${isLive ? "status-connected" : isOffline ? "status-disconnected" : "status-coming"}`;
-  updatedAtEl.textContent = brokerEngineLastCheckedAt
-    ? `Last checked: ${brokerEngineLastCheckedAt.toLocaleTimeString()}`
-    : "Last checked: never";
-
-  if (isOffline) {
-    adaptersEl.innerHTML = `
-      <article class="broker-engine-card">
-        <h4>Broker Engine Unavailable</h4>
-        <p class="muted">The backend status endpoints are offline. Portfolio, quotes, and Plaid fallback behavior remain unchanged.</p>
-      </article>
-    `;
+function renderHoldings() {
+  const element = document.getElementById("holdingsTable");
+  if (!element) return;
+  const holdings = safeArray(portfolio.holdings).filter((holding) => !holding.cash_equivalent && !isOptionHolding(holding));
+  if (!currentUser || !safeArray(portfolio.accounts).length) {
+    element.innerHTML = '<p class="muted">Connect a brokerage account to load live holdings.</p>';
     return;
   }
-
-  if (!brokerEngineAdapters.length) {
-    adaptersEl.innerHTML = `
-      <article class="broker-engine-card">
-        <h4>Loading Broker Engine</h4>
-        <p class="muted">Checking registered adapters and read-only capabilities...</p>
-      </article>
-    `;
-    return;
-  }
-
-  adaptersEl.innerHTML = brokerEngineAdapters.map((adapter) => {
-    const capabilities = adapter.capabilities || brokerEngineCapabilities[adapter.id] || {};
-    const implemented = Boolean(adapter.implemented);
-    const authenticated = Boolean(adapter.authenticated);
-
-    return `
-      <article class="broker-engine-card">
-        <div class="broker-engine-card-header">
-          <h4>${escapeHtml(adapter.name || adapter.id)}</h4>
-          <span class="status-pill ${implemented ? "status-connected" : "status-coming"}">
-            ${implemented ? "Implemented" : "Stubbed"}
-          </span>
-        </div>
-
-        <p>Adapter ID: <strong>${escapeHtml(adapter.id)}</strong></p>
-        <p>Authenticated: <strong>${authenticated ? "Yes" : "No"}</strong></p>
-        <div class="broker-engine-capabilities">
-          <span>Holdings: <strong>${formatCapability(capabilities.supportsHoldings)}</strong></span>
-          <span>Options: <strong>${formatCapability(capabilities.supportsOptions)}</strong></span>
-          <span>Transactions: <strong>${formatCapability(capabilities.supportsTransactions)}</strong></span>
-          <span>Dividends: <strong>${formatCapability(capabilities.supportsDividends)}</strong></span>
-          <span>Real-time Quotes: <strong>${formatCapability(capabilities.supportsRealTimeQuotes)}</strong></span>
-        </div>
-      </article>
-    `;
-  }).join("");
-}
-
-function connectBroker(accountId) {
-  const broker = brokers.find((item) => item.id === accountId);
-
-  if (!broker) return;
-
-  if (getBrokerConnection(broker.id)?.status === "connected") {
-    fetchBrokerConnections();
-    fetchPortfolio();
-    setPlaidStatus(`${broker.name} account sync requested.`);
-    return;
-  }
-
-  if (broker.id === "robinhood" && portfolioFetchStatus === "live" && livePortfolioSource === "robinhood") {
-    fetchPortfolio();
-    setPlaidStatus("Robinhood sync started.");
-    return;
-  }
-
-  connectWithPlaid(broker.id);
-}
-
-/* HOLDINGS */
-
-function firstFiniteNumber(values, fallback = 0) {
-  for (const value of values) {
-    const number = Number(value);
-
-    if (Number.isFinite(number)) return number;
-  }
-
-  return fallback;
-}
-
-function normalizeHoldingRow(holding) {
-  if (!holding || typeof holding !== "object") return null;
-
-  const symbol = normalizeTicker(
-    holding.symbol ||
-    holding.ticker ||
-    holding.instrument ||
-    holding.name
-  );
-
-  const quantity = firstFiniteNumber([
-    holding.quantity,
-    holding.shares,
-    holding.qty,
-    holding.units
-  ]);
-
-  if (!symbol || quantity <= 0) return null;
-
-  const quote = quotes[symbol] || {};
-  const currentPrice = firstFiniteNumber([
-    holding.current_price,
-    holding.currentPrice,
-    holding.price,
-    holding.last_price,
-    holding.market_price,
-    getQuotePrice(quote)
-  ]);
-
-  const marketValue = firstFiniteNumber([
-    holding.market_value,
-    holding.marketValue,
-    holding.value,
-    holding.equity,
-    currentPrice ? quantity * currentPrice : undefined
-  ]);
-
-  if (marketValue <= 0 && currentPrice <= 0) return null;
-
-  const avgCost = firstFiniteNumber([
-    holding.average_cost,
-    holding.avg_cost,
-    holding.averageCost,
-    holding.average_buy_price,
-    holding.cost_basis_per_share
-  ]);
-
-  const todaysChange = firstFiniteNumber([
-    holding.day_change,
-    holding.dayChange,
-    holding.today_change,
-    holding.todayChange,
-    holding.change,
-    holding.price_change
-  ]);
-
-  const explicitTotalGainLoss = firstFiniteNumber([
-    holding.total_gain_loss,
-    holding.totalGainLoss,
-    holding.unrealized_pl,
-    holding.unrealizedPL,
-    holding.gain_loss,
-    holding.gainLoss
-  ], NaN);
-
-  const totalCost = quantity * avgCost;
-  const totalGainLoss = Number.isFinite(explicitTotalGainLoss)
-    ? explicitTotalGainLoss
-    : totalCost
-      ? marketValue - totalCost
-      : 0;
-
-  const totalGainLossPercent = totalCost ? (totalGainLoss / totalCost) * 100 : 0;
-
-  return {
-    symbol,
-    quantity,
-    currentPrice,
-    marketValue,
-    todaysChange,
-    totalGainLoss,
-    totalGainLossPercent
-  };
-}
-
-function renderHoldingsTable() {
-  const holdingsTable = document.getElementById("holdingsTable");
-
-  if (!holdingsTable) return;
-
-  const holdings = getLiveHoldings();
-
-  if (!livePortfolio) {
-    holdingsTable.innerHTML = `
-      <p class="muted">
-        Portfolio is loading. If this stays here, the backend portfolio endpoint is offline.
-      </p>
-    `;
-    return;
-  }
-
   if (!holdings.length) {
-    holdingsTable.innerHTML = `
-      <p class="muted">
-        Portfolio totals are live, but holdings are not being sent from the backend yet.
-        Next step is updating Replit /api/portfolio so it includes positions.
-      </p>
-    `;
+    element.innerHTML = '<p class="muted">The connected accounts returned no non-option holdings.</p>';
     return;
   }
-
-  const rows = holdings
-    .map(normalizeHoldingRow)
-    .filter(Boolean);
-
-  if (!rows.length) {
-    holdingsTable.innerHTML = `
-      <p class="muted">
-        Holdings were received, but none had enough valid data to display.
-      </p>
-    `;
-    return;
-  }
-
-  holdingsTable.innerHTML = rows.map((holding) => {
-    return `
-      <div class="table-row">
-        <strong>${holding.symbol}</strong>
-        <span>${holding.quantity.toLocaleString()} shares</span>
-        <span>Current: ${holding.currentPrice ? formatCurrency(holding.currentPrice) : "--"}</span>
-        <span>Value: ${formatCurrency(holding.marketValue)}</span>
-        <span class="${getChangeClass(holding.todaysChange)}">
-          Today: ${formatCurrency(holding.todaysChange)}
-        </span>
-        <span class="${getChangeClass(holding.totalGainLoss)}">
-          Total: ${formatCurrency(holding.totalGainLoss)} / ${formatPercent(holding.totalGainLossPercent)}
-        </span>
-      </div>
-    `;
-  }).join("");
+  element.innerHTML = holdings.map((holding) => `
+    <div class="table-row">
+      <strong>${escapeHtml(holding.symbol || "Unknown")}</strong>
+      <span>${formatNumber(holding.quantity)} units</span>
+      <span>Price: ${optionalFiniteNumber(holding.current_price) === null ? "--" : formatCurrency(holding.current_price)}</span>
+      <span>Value: ${formatCurrency(holding.market_value)}</span>
+      <span>${escapeHtml(holding.account_name || "Investment Account")}</span>
+    </div>`).join("");
 }
-
-/* WATCHLIST */
-
-function addTickerToWatchlist(ticker) {
-  if (watchlist.includes(ticker)) return;
-
-  watchlist.push(ticker);
-  saveToStorage(STORAGE_KEYS.watchlist, watchlist);
-
-  renderQuoteGrid();
-  renderWatchlistTable();
-  fetchQuotes();
-}
-
-function removeTickerFromWatchlist(ticker) {
-  watchlist = watchlist.filter((item) => item !== ticker);
-  delete quotes[ticker];
-
-  saveToStorage(STORAGE_KEYS.watchlist, watchlist);
-
-  renderQuoteGrid();
-  renderWatchlistTable();
-  fetchQuotes();
-}
-
-function renderWatchlistCards() {
-  renderQuoteGrid();
-}
-
-function renderQuoteGrid() {
-  const quoteGrid = document.getElementById("quoteGrid");
-
-  if (!quoteGrid) return;
-
-  if (!watchlist.length) {
-    quoteGrid.innerHTML = `<p class="muted">No tickers yet.</p>`;
-    return;
-  }
-
-  quoteGrid.innerHTML = watchlist.map((ticker) => {
-    const quote = quotes[ticker] || {};
-    const price = getQuotePrice(quote);
-    const change = getQuoteChange(quote);
-    const percent = getQuotePercent(quote);
-
-    return `
-      <article class="quote-card">
-        <div class="quote-card-header">
-          <h4>${ticker}</h4>
-          <button onclick="removeTickerFromWatchlist('${ticker}')">Remove</button>
-        </div>
-
-        <div class="quote-price">
-          ${price ? formatCurrency(price) : "Loading..."}
-        </div>
-
-        <div class="quote-change ${getChangeClass(change)}">
-          ${formatCurrency(change)} / ${formatPercent(percent)}
-        </div>
-
-        <small class="muted">
-          Source: ${quote.source || "Backend"}
-        </small>
-      </article>
-    `;
-  }).join("");
-}
-
-function renderWatchlistTable() {
-  const watchlistTable = document.getElementById("watchlistTable");
-
-  if (!watchlistTable) return;
-
-  if (!watchlist.length) {
-    watchlistTable.innerHTML = `<p class="muted">Your watchlist is empty.</p>`;
-    return;
-  }
-
-  watchlistTable.innerHTML = watchlist.map((ticker) => {
-    const quote = quotes[ticker] || {};
-    const price = getQuotePrice(quote);
-    const change = getQuoteChange(quote);
-    const percent = getQuotePercent(quote);
-
-    return `
-      <div class="table-row">
-        <strong>${ticker}</strong>
-        <span>${price ? formatCurrency(price) : "Loading..."}</span>
-        <span class="${getChangeClass(change)}">
-          ${formatCurrency(change)} / ${formatPercent(percent)}
-        </span>
-        <button onclick="removeTickerFromWatchlist('${ticker}')">Remove</button>
-      </div>
-    `;
-  }).join("");
-}
-
-/* PROFESSIONAL WORKSPACE */
-
-function formatCompactNumber(value) {
-  const number = Number(value) || 0;
-
-  if (number >= 1_000_000_000) return `${(number / 1_000_000_000).toFixed(1)}B`;
-  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
-  if (number >= 1_000) return `${(number / 1_000).toFixed(1)}K`;
-
-  return number.toLocaleString();
-}
-
-function renderMarketHeatMap() {
-  const heatMap = document.getElementById("marketHeatMap");
-
-  if (heatMap) {
-    heatMap.innerHTML = sectorPerformance.map((item) => {
-      return `
-        <article class="heat-map-tile ${getChangeClass(item.change)}">
-          <strong>${item.sector}</strong>
-          <span>${formatPercent(item.change)}</span>
-          <small>${item.breadth} breadth</small>
-        </article>
-      `;
-    }).join("");
-  }
-
-  setText("marketAdvancers", marketBreadth.advancers);
-  setText("marketDecliners", marketBreadth.decliners);
-  setText("marketHighs", marketBreadth.highs);
-  setText("marketLows", marketBreadth.lows);
-}
-
-function getAdvancedWatchlistRows() {
-  const filter = advancedWatchlistFilter.trim().toUpperCase();
-
-  return watchlist
-    .filter((ticker) => !filter || ticker.includes(filter))
-    .map((ticker) => {
-      const quote = quotes[ticker] || {};
-      const price = getQuotePrice(quote);
-      const percent = getQuotePercent(quote);
-      const volume = Number(quote.volume || quote.regularMarketVolume || 0);
-      const marketCap = Number(quote.marketCap || quote.market_cap || 0);
-
-      return { ticker, price, percent, volume, marketCap };
-    })
-    .sort((a, b) => {
-      if (advancedWatchlistSort === "symbol") return a.ticker.localeCompare(b.ticker);
-      return Number(b[advancedWatchlistSort] || 0) - Number(a[advancedWatchlistSort] || 0);
-    });
-}
-
-function renderAdvancedWatchlist() {
-  const table = document.getElementById("advancedWatchlistTable");
-
-  if (!table) return;
-
-  const rows = getAdvancedWatchlistRows();
-
-  if (!rows.length) {
-    table.innerHTML = `<p class="muted">No symbols match the current watchlist filter.</p>`;
-    return;
-  }
-
-  table.innerHTML = rows.map((row) => {
-    return `
-      <div class="workspace-table-row advanced-watchlist-row">
-        <strong>${row.ticker}</strong>
-        <span>${row.price ? formatCurrency(row.price) : "Loading..."}</span>
-        <span class="${getChangeClass(row.percent)}">${formatPercent(row.percent)}</span>
-        <span>${row.volume ? formatCompactNumber(row.volume) : "API ready"}</span>
-        <span>${row.marketCap ? formatCompactNumber(row.marketCap) : "API ready"}</span>
-        <span title="Alert rules coming with live backend">🔔</span>
-      </div>
-    `;
-  }).join("");
-}
-
-function renderNewsList(id, items) {
-  const feed = document.getElementById(id);
-
-  if (!feed) return;
-
-  if (!items.length) {
-    feed.innerHTML = `<p class="muted">No news available. API integration placeholder.</p>`;
-    return;
-  }
-
-  feed.innerHTML = items.map((item) => {
-    return `
-      <article class="news-item">
-        <strong>${item.title}</strong>
-        <small>${item.source} · ${item.time}</small>
-      </article>
-    `;
-  }).join("");
-}
-
-function renderNewsCenter() {
-  renderNewsList("marketNewsFeed", placeholderNews.market);
-  renderNewsList("companyNewsFeed", placeholderNews.company);
-  renderNewsList("watchlistNewsFeed", placeholderNews.watchlist);
-}
-
-function renderEconomicCalendar() {
-  const calendar = document.getElementById("economicCalendarList");
-
-  if (!calendar) return;
-
-  calendar.innerHTML = economicEvents.map((event) => {
-    return `
-      <article class="timeline-item">
-        <span>${event.category}</span>
-        <strong>${event.title}</strong>
-        <small>${event.date} · ${event.impact} impact</small>
-      </article>
-    `;
-  }).join("");
-}
-
-function renderOptionsDashboard() {
-  setText("putCallRatio", optionsDashboardData.putCallRatio.toFixed(2));
-  setText("highestIvTicker", optionsDashboardData.highestIv.ticker);
-  setText("highestIvValue", optionsDashboardData.highestIv.value);
-  setText("highestOptionVolumeTicker", optionsDashboardData.highestVolume.ticker);
-  setText("highestOptionVolumeValue", optionsDashboardData.highestVolume.value);
-
-  const table = document.getElementById("unusualOptionsTable");
-
-  if (!table) return;
-
-  table.innerHTML = optionsDashboardData.unusualActivity.map((item) => {
-    return `
-      <div class="workspace-table-row unusual-options-row">
-        <strong>${item.ticker}</strong>
-        <span>${item.contract}</span>
-        <span>${item.expiry}</span>
-        <span>${item.volume}</span>
-        <span>${item.note}</span>
-      </div>
-    `;
-  }).join("");
-}
-
-/* OPTIONS */
 
 function renderOptions() {
-  const totalPL = sampleOptions.reduce((sum, option) => {
-    return sum + getOptionPL(option);
-  }, 0);
+  const options = safeArray(portfolio.holdings).filter((holding) => !holding.cash_equivalent && isOptionHolding(holding));
+  setText("optionPositionCount", String(options.length));
+  setText("optionsMarketValue", formatCurrency(options.reduce((sum, item) => sum + finiteNumber(item.market_value), 0)));
+  const element = document.getElementById("optionsTable");
+  if (!element) return;
+  if (!currentUser || !safeArray(portfolio.accounts).length) {
+    element.innerHTML = '<p class="muted">Connect a brokerage account to load option positions.</p>';
+    return;
+  }
+  if (!options.length) {
+    element.innerHTML = '<p class="muted">The connected accounts returned no option positions.</p>';
+    return;
+  }
+  element.innerHTML = options.map((holding) => `
+    <div class="table-row">
+      <strong>${escapeHtml(holding.symbol || holding.option_symbol || "Option")}</strong>
+      <span>${formatNumber(holding.quantity)} contracts</span>
+      <span>Price: ${optionalFiniteNumber(holding.current_price) === null ? "--" : formatCurrency(holding.current_price)}</span>
+      <span>Value: ${formatCurrency(holding.market_value)}</span>
+      <span>${escapeHtml(holding.account_name || "Investment Account")}</span>
+    </div>`).join("");
+}
 
-  const winners = sampleOptions.filter((option) => getOptionPL(option) > 0).length;
-  const winRate = sampleOptions.length ? (winners / sampleOptions.length) * 100 : 0;
+async function fetchQuotes() {
+  renderQuoteLoading();
+  if (!watchlist.length) return;
+  try {
+    const result = await apiFetchJson(`/api/quotes?symbols=${encodeURIComponent(watchlist.join(","))}`);
+    const quoteSource = String(result.source || "").trim();
+    if (!quoteSource) {
+      throw new Error("The quote API did not identify a live provider");
+    }
+    quotes = {};
+    safeArray(result.data).forEach((quote) => {
+      const symbol = normalizeTicker(quote.symbol || quote.ticker);
+      if (symbol) quotes[symbol] = quote;
+    });
+    setText("quoteStatus", `Live (${quoteSource})`);
+    setText("lastQuoteUpdate", formatTimestamp(result.data_as_of || new Date().toISOString()));
+  } catch (error) {
+    quotes = {};
+    setText("quoteStatus", "Unavailable");
+    setText("lastQuoteUpdate", "No live feed");
+    console.warn("Live quotes unavailable:", error);
+  }
+  renderQuotes();
+}
 
-  setText("optionContracts", getTotalContracts());
-  setText("optionsPL", formatCurrency(totalPL));
-  setText("optionWinRate", `${winRate.toFixed(0)}%`);
-  setText("riskScore", calculateRiskScore());
+function renderQuoteLoading() {
+  setText("quoteStatus", "Loading...");
+  renderQuotes();
+}
 
-  const openOptionsTable = document.getElementById("openOptionsTable");
-
-  if (!openOptionsTable) return;
-
-  openOptionsTable.innerHTML = sampleOptions.map((option) => {
-    const pl = getOptionPL(option);
-
+function renderQuotes() {
+  const grid = document.getElementById("quoteGrid");
+  const table = document.getElementById("watchlistTable");
+  const cards = watchlist.map((symbol) => {
+    const quote = quotes[symbol];
+    const price = optionalFiniteNumber(quote?.price);
+    const change = optionalFiniteNumber(quote?.change);
     return `
-      <div class="table-row">
-        <strong>${option.ticker} ${option.type}</strong>
-        <span>$${option.strike} / ${option.expiration}</span>
-        <span>${option.contracts} contracts</span>
-        <span class="${getChangeClass(pl)}">${formatCurrency(pl)}</span>
-      </div>
-    `;
+      <article class="quote-card">
+        <strong>${escapeHtml(symbol)}</strong>
+        <span>${price === null ? "Live quote unavailable" : formatCurrency(price)}</span>
+        <small>${change === null ? "" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</small>
+      </article>`;
   }).join("");
-}
-
-function getOptionPL(option) {
-  return (
-    (Number(option.current) - Number(option.avgCost)) *
-    Number(option.contracts) *
-    100
-  );
-}
-
-function getTotalContracts() {
-  return sampleOptions.reduce((sum, option) => {
-    return sum + Number(option.contracts || 0);
-  }, 0);
-}
-
-function calculateRiskScore() {
-  const contracts = getTotalContracts();
-
-  if (contracts >= 10) return 85;
-  if (contracts >= 5) return 62;
-
-  return 38;
-}
-
-function renderRiskAnalysis() {
-  const riskAnalysisBox = document.getElementById("riskAnalysisBox");
-
-  if (!riskAnalysisBox) return;
-
-  const score = calculateRiskScore();
-
-  let message = "Risk is controlled. Position sizing is reasonable.";
-
-  if (score >= 80) {
-    message = "Risk is high. Reduce contract count or avoid overconcentration.";
-  } else if (score >= 60) {
-    message = "Risk is moderate. Keep position sizing tight and avoid chasing.";
+  if (grid) grid.innerHTML = cards || '<p class="muted">No symbols in the watchlist.</p>';
+  if (table) {
+    table.innerHTML = watchlist.map((symbol) => {
+      const quote = quotes[symbol];
+      const price = optionalFiniteNumber(quote?.price);
+      return `
+        <div class="table-row">
+          <strong>${escapeHtml(symbol)}</strong>
+          <span>${price === null ? "Unavailable" : formatCurrency(price)}</span>
+          <button type="button" data-remove-symbol="${escapeHtml(symbol)}">Remove</button>
+        </div>`;
+    }).join("") || '<p class="muted">No symbols in the watchlist.</p>';
+    table.querySelectorAll("[data-remove-symbol]").forEach((button) => {
+      button.addEventListener("click", () => {
+        watchlist = watchlist.filter((symbol) => symbol !== button.dataset.removeSymbol);
+        saveStoredJson(STORAGE_KEYS.watchlist, watchlist);
+        fetchQuotes();
+      });
+    });
   }
-
-  riskAnalysisBox.innerHTML = `
-    <p><strong>Current Risk Score:</strong> ${score}</p>
-    <p>${message}</p>
-    <p class="muted">
-      Placeholder logic for now. Later this will use Greeks, expiration,
-      account size, and max-loss rules.
-    </p>
-  `;
 }
 
-/* APPROVALS */
-
-function renderPendingTrade() {
-  const trade = pendingTrades[currentPendingIndex];
-
-  if (!trade) return;
-
-  setText("approvalTicker", trade.ticker);
-  setText("approvalDescription", trade.description);
-}
-
-function handleTradeApproval(status) {
-  const trade = pendingTrades[currentPendingIndex];
-
-  if (!trade) return;
-
-  approvalHistory.unshift({
-    ticker: trade.ticker,
-    description: trade.description,
-    status,
-    date: new Date().toLocaleString()
-  });
-
-  saveToStorage(STORAGE_KEYS.approvals, approvalHistory);
-
-  currentPendingIndex = (currentPendingIndex + 1) % pendingTrades.length;
-
-  renderPendingTrade();
-  renderApprovalHistory();
-}
-
-function renderApprovalHistory() {
-  const approvalHistoryBox = document.getElementById("approvalHistory");
-
-  if (!approvalHistoryBox) return;
-
-  if (!approvalHistory.length) {
-    approvalHistoryBox.innerHTML = `<p class="muted">No approval history yet.</p>`;
+function renderJournal() {
+  const element = document.getElementById("journalEntries");
+  if (!element) return;
+  if (!journalEntries.length) {
+    element.innerHTML = '<p class="muted">No journal entries yet.</p>';
     return;
   }
-
-  approvalHistoryBox.innerHTML = approvalHistory.slice(0, 8).map((item) => {
-    const itemClass = item.status === "Approved" ? "positive" : "negative";
-
-    return `
-      <div class="approval-item">
-        <strong>${item.ticker}</strong>
-        <p>${item.description}</p>
-        <p class="${itemClass}">${item.status}</p>
-        <small class="muted">${item.date}</small>
-      </div>
-    `;
-  }).join("");
+  element.innerHTML = journalEntries.map((entry) => `
+    <article class="account-card">
+      <h4>${escapeHtml(entry.ticker || "Journal Entry")}</h4>
+      <p>${escapeHtml(entry.strategy || "No strategy recorded")}</p>
+      <p><strong>${escapeHtml(entry.result || "No result recorded")}</strong></p>
+      <p class="muted">${escapeHtml(formatTimestamp(entry.created_at))}</p>
+    </article>`).join("");
 }
 
-/* JOURNAL */
-
-function saveJournalEntry() {
-  const tickerInput = document.getElementById("journalTicker");
-  const strategyInput = document.getElementById("journalStrategy");
-  const resultInput = document.getElementById("journalResult");
-
-  if (!tickerInput || !strategyInput || !resultInput) return;
-
-  const ticker = normalizeTicker(tickerInput.value);
-  const strategy = strategyInput.value.trim();
-  const result = resultInput.value.trim();
-
-  if (!ticker || !strategy || !result) {
-    alert("Fill out ticker, strategy, and result first.");
-    return;
-  }
-
-  tradeJournal.unshift({
-    id: Date.now(),
-    ticker,
-    strategy,
-    result,
-    date: new Date().toLocaleString()
-  });
-
-  saveToStorage(STORAGE_KEYS.journal, tradeJournal);
-
-  tickerInput.value = "";
-  strategyInput.value = "";
-  resultInput.value = "";
-
-  renderJournalEntries();
-}
-
-function renderJournalEntries() {
-  const journalEntries = document.getElementById("journalEntries");
-
-  if (!journalEntries) return;
-
-  if (!tradeJournal.length) {
-    journalEntries.innerHTML = `<p class="muted">No journal entries yet.</p>`;
-    return;
-  }
-
-  journalEntries.innerHTML = tradeJournal.map((entry) => {
-    return `
-      <article class="journal-entry">
-        <h4>${entry.ticker}</h4>
-        <p><strong>Strategy:</strong> ${entry.strategy}</p>
-        <p><strong>Result:</strong> ${entry.result}</p>
-        <small class="muted">${entry.date}</small>
-        <br />
-        <button onclick="deleteJournalEntry(${entry.id})">Delete</button>
-      </article>
-    `;
-  }).join("");
-}
-
-function deleteJournalEntry(id) {
-  tradeJournal = tradeJournal.filter((entry) => entry.id !== id);
-  saveToStorage(STORAGE_KEYS.journal, tradeJournal);
-  renderJournalEntries();
-}
-
-/* SETTINGS */
-
-function savePortfolioGoal() {
-  const goalInput = document.getElementById("goalInput");
-
-  if (!goalInput) return;
-
-  const goal = Number(goalInput.value);
-
-  if (!goal) {
-    alert("Enter a portfolio goal first.");
-    return;
-  }
-
-  saveToStorage(STORAGE_KEYS.goal, goal);
-  alert(`Portfolio goal saved: ${formatCurrency(goal)}`);
+function saveGoal() {
+  const input = document.getElementById("goalInput");
+  const goal = finiteNumber(input?.value, 0);
+  saveStoredJson(STORAGE_KEYS.goal, goal);
+  setText("goalStatus", goal > 0 ? `Goal saved: ${formatCurrency(goal)}` : "Goal cleared.");
 }
 
 function renderGoal() {
-  const goalInput = document.getElementById("goalInput");
-
-  if (!goalInput) return;
-
-  const savedGoal = loadFromStorage(STORAGE_KEYS.goal, "");
-  goalInput.value = savedGoal || "";
+  const goal = loadStoredJson(STORAGE_KEYS.goal, 0);
+  const input = document.getElementById("goalInput");
+  if (input && goal > 0) input.value = String(goal);
+  setText("goalStatus", goal > 0 ? `Current goal: ${formatCurrency(goal)}` : "No goal saved.");
 }
 
-/* NOTIFICATIONS */
-
-function enableNotifications() {
-  if (!("Notification" in window)) {
-    alert("This browser does not support notifications.");
-    return;
-  }
-
-  Notification.requestPermission().then((permission) => {
-    if (permission === "granted") {
-      alert("Notifications enabled.");
-    } else {
-      alert("Notifications were not enabled.");
-    }
-  });
+async function refreshPrivateData() {
+  if (!currentUser) return;
+  await Promise.allSettled([checkSnapTradeConfig(), fetchConnections(), fetchPortfolio()]);
 }
 
-function sendTestNotification() {
-  if (!("Notification" in window)) {
-    alert("Test alert is working.");
-    return;
-  }
+async function refreshAllData() {
+  await Promise.allSettled([checkBackendHealth(), fetchQuotes(), refreshPrivateData()]);
+}
 
-  if (Notification.permission === "granted") {
-    new Notification("Trading Dashboard Alert", {
-      body: "Test alert is working."
-    });
+async function handleSnapTradeReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status");
+  if (!status) return;
+  window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
+  if (status === "SUCCESS") {
+    setBrokerageMessage("Brokerage connection completed. Loading account data...");
+    await refreshPrivateData();
+  } else if (status === "ABANDONED") {
+    setBrokerageMessage("Brokerage connection was closed before completion.");
   } else {
-    alert("Enable notifications first.");
+    setBrokerageMessage(`Brokerage connection failed: ${params.get("error_code") || "unknown error"}`, true);
   }
 }
 
-/* AI COMMAND CENTER */
-
-async function fetchAiCommandCenter() {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/ai/command-center`);
-    const result = await response.json();
-
-    if (!result.success || !result.data) {
-      throw new Error("AI command center failed");
-    }
-
-    aiCommandCenter = result.data;
-    renderAiCommandCenter();
-  } catch (error) {
-    console.warn("AI command center unavailable:", error);
-    aiCommandCenter = null;
-    renderAiCommandCenter();
-  }
+async function initialize() {
+  setupNavigation();
+  setupFormsAndButtons();
+  renderPortfolio();
+  renderAccounts();
+  renderConnections();
+  renderHoldings();
+  renderOptions();
+  renderQuotes();
+  renderJournal();
+  renderGoal();
+  await Promise.allSettled([checkBackendHealth(), checkAuth(), fetchQuotes()]);
+  if (currentUser) await refreshPrivateData();
+  await handleSnapTradeReturn();
+  setInterval(fetchQuotes, 60_000);
+  setInterval(() => {
+    if (currentUser) fetchPortfolio();
+  }, 10 * 60_000);
 }
 
-function renderAiCommandCenter() {
-  const summaryBox = document.getElementById("aiCommandSummary");
-  const alertsBox = document.getElementById("aiCommandAlerts");
-
-  if (!summaryBox || !alertsBox) return;
-
-  if (!aiCommandCenter) {
-    setText("aiConfidenceScore", "--");
-    setText("aiMarketBias", "Offline");
-
-    summaryBox.textContent = "AI Command Center is unavailable.";
-
-    alertsBox.innerHTML = `<p class="muted">No AI alerts available.</p>`;
-    return;
-  }
-
-  setText("aiConfidenceScore", `${aiCommandCenter.confidence_score}%`);
-  setText("aiMarketBias", aiCommandCenter.market_bias || "Neutral");
-
-  summaryBox.textContent = aiCommandCenter.summary || "AI monitoring active.";
-
-  const alerts = aiCommandCenter.alerts || [];
-
-  if (!alerts.length) {
-    alertsBox.innerHTML = `<p class="muted">No AI alerts available.</p>`;
-    return;
-  }
-
-  alertsBox.innerHTML = alerts.map((alert, index) => {
-    const isOption = alert.type === "CALL" || alert.type === "PUT";
-
-    const title = isOption
-      ? `${alert.ticker} ${alert.type} $${alert.strike}`
-      : `${alert.ticker} ${alert.category}`;
-
-    return `
-      <article class="approval-item">
-        <strong>${title}</strong>
-        <p>Category: ${alert.category}</p>
-        <p>Confidence: <strong>${alert.confidence}%</strong></p>
-        <p>Risk: <strong>${alert.risk}</strong></p>
-        <p class="muted">${alert.reason}</p>
-        <button onclick="addCommandAlertToApprovalQueue(${index})">
-          Add to Approval Queue
-        </button>
-      </article>
-    `;
-  }).join("");
-}
-
-function addCommandAlertToApprovalQueue(index) {
-  if (!aiCommandCenter || !aiCommandCenter.alerts) return;
-
-  const alert = aiCommandCenter.alerts[index];
-
-  if (!alert) return;
-
-  const isOption = alert.type === "CALL" || alert.type === "PUT";
-
-  const tradeDescription = isOption
-    ? `${alert.type} $${alert.strike} exp ${alert.expiration}. ${alert.reason}`
-    : `${alert.category}. ${alert.reason}`;
-
-  pendingTrades.unshift({
-    ticker: alert.ticker,
-    description: tradeDescription
+document.addEventListener("DOMContentLoaded", () => {
+  initialize().catch((error) => {
+    console.error("Dashboard initialization failed:", error);
+    setBrokerageMessage("Dashboard initialization failed. Check the API deployment.", true);
   });
-
-  currentPendingIndex = 0;
-  renderPendingTrade();
-
-  alert(`${alert.ticker} added to approval queue.`);
-}
+});
