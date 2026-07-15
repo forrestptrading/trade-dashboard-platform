@@ -11,6 +11,7 @@ const textExtensions = new Set([
 const productionFiles = new Set([
   "index.html",
   "script.js",
+  "minute-refresh.js",
   ".github/workflows/pages.yml",
   "artifacts/api-server/src/app.ts",
   "artifacts/api-server/src/routes/index.ts",
@@ -121,8 +122,16 @@ if (!pagesWorkflow.includes("cp index.html style.css script.js _site/")) {
   productionViolations.push({
     path: ".github/workflows/pages.yml",
     line: 1,
-    problem: "Pages deployment is not using the single production script",
+    problem: "Pages deployment is not using the production script",
     value: "expected direct copy",
+  });
+}
+if (!pagesWorkflow.includes("cat minute-refresh.js >> _site/script.js")) {
+  productionViolations.push({
+    path: ".github/workflows/pages.yml",
+    line: 1,
+    problem: "Minute refresh module is not included in the deployed bundle",
+    value: "expected minute refresh append",
   });
 }
 if (/cat\s+script\.js|patch\.js/.test(pagesWorkflow)) {
