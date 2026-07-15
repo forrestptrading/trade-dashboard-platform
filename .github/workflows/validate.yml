@@ -42,7 +42,10 @@ jobs:
         run: |
           set -o pipefail
           node --check script.js 2>&1 | tee /tmp/javascript-check.log
+          node --check minute-refresh.js 2>&1 | tee -a /tmp/javascript-check.log
           node --check scripts/audit-production-data.mjs 2>&1 | tee -a /tmp/javascript-check.log
+          cat script.js minute-refresh.js > /tmp/dashboard.js
+          node --check /tmp/dashboard.js 2>&1 | tee -a /tmp/javascript-check.log
           node -e 'const fs=require("fs"); const html=fs.readFileSync("index.html","utf8"); const blocks=[...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]; for (const [,source] of blocks) new Function(source); console.log(`Validated ${blocks.length} inline script block(s).`);' 2>&1 | tee -a /tmp/javascript-check.log
 
       - name: Audit every repository file
