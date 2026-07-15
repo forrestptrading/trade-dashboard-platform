@@ -40,7 +40,7 @@ jobs:
       - name: Check deployed dashboard JavaScript
         if: always()
         run: |
-          cat script.js api-credentials-patch.js snaptrade-frontend-patch.js snaptrade-session-patch.js > /tmp/dashboard.js
+          cat script.js api-credentials-patch.js snaptrade-frontend-patch.js snaptrade-session-patch.js no-mock-portfolio-patch.js > /tmp/dashboard.js
           node --check /tmp/dashboard.js 2>&1 | tee /tmp/javascript-check.log
 
       - name: Upload validation diagnostics
