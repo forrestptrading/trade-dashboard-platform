@@ -1,4 +1,9 @@
-import express, { type Express } from "express";
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -6,6 +11,26 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+const DEFAULT_DASHBOARD_ORIGIN = "https://forrestptrading.github.io";
+const DEFAULT_API_ORIGIN =
+  "https://trade-dashboard-api--forrestpbusines.replit.app";
+
+function getAllowedOrigins(): Set<string> {
+  const origins = new Set([DEFAULT_DASHBOARD_ORIGIN, DEFAULT_API_ORIGIN]);
+  const configuredUrl = process.env["DASHBOARD_PUBLIC_URL"]?.trim();
+
+  if (configuredUrl) {
+    try {
+      origins.add(new URL(configuredUrl).origin);
+    } catch {
+      logger.warn("[cors] DASHBOARD_PUBLIC_URL is not a valid URL");
+    }
+  }
+
+  return origins;
+}
+
+const allowedOrigins = getAllowedOrigins();
 
 app.use(
   pinoHttp({
@@ -26,12 +51,61 @@ app.use(
     },
   }),
 );
-// Reflect the request origin and allow credentials so cookie-based sessions work
-// whether the frontend is served same-origin (Vite dev proxy) or cross-origin.
-app.use(cors({ origin: true, credentials: true }));
+
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, callback) {
+      const isProduction = process.env["NODE_ENV"] === "production";
+
+      if (!origin || !isProduction || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin is not allowed by CORS"));
+    },
+  }),
+);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+function requireDashboardOwnerEmail(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const ownerEmail =
+    process.env["DASHBOARD_OWNER_EMAIL"]?.trim().toLowerCase() ?? "";
+  const submittedEmail =
+    typeof req.body?.email === "string"
+      ? req.body.email.trim().toLowerCase()
+      : "";
+
+  if (!ownerEmail) {
+    res.status(503).json({
+      success: false,
+      error: "DASHBOARD_OWNER_EMAIL is not configured",
+    });
+    return;
+  }
+
+  if (submittedEmail !== ownerEmail) {
+    res.status(403).json({
+      success: false,
+      error: "Dashboard access is restricted to the owner email",
+    });
+    return;
+  }
+
+  next();
+}
+
+app.use(
+  ["/api/auth/register", "/api/auth/login"],
+  requireDashboardOwnerEmail,
+);
 
 app.get("/", (_req, res) => {
   res.send("Trade Dashboard API is running");
