@@ -21,6 +21,7 @@ import performanceRouter from "./performance";
 import aiTradesRouter from "./aiTrades";
 import notificationsRouter from "./notifications";
 import brokerConnectionsRouter from "./brokerConnections";
+import snapTradeSessionRouter from "./snaptradeSession";
 import snapTradeRouter from "./snaptrade";
 import brokerEngineRouter from "./brokerEngine";
 
@@ -48,6 +49,7 @@ router.use(performanceRouter);
 router.use(aiTradesRouter);
 router.use(notificationsRouter);
 router.use(brokerConnectionsRouter);
+router.use(snapTradeSessionRouter);
 router.use(snapTradeRouter);
 router.use(brokerEngineRouter);
 
