@@ -37,11 +37,15 @@ jobs:
             pnpm --filter @workspace/api-server typecheck
           } 2>&1 | tee /tmp/typecheck.log
 
-      - name: Check deployed dashboard JavaScript
+      - name: Check production JavaScript
         if: always()
         run: |
-          cat script.js api-credentials-patch.js snaptrade-frontend-patch.js snaptrade-session-patch.js no-mock-portfolio-patch.js > /tmp/dashboard.js
-          node --check /tmp/dashboard.js 2>&1 | tee /tmp/javascript-check.log
+          node --check script.js 2>&1 | tee /tmp/javascript-check.log
+          node --check scripts/audit-production-data.mjs 2>&1 | tee -a /tmp/javascript-check.log
+
+      - name: Audit every repository file
+        if: always()
+        run: node scripts/audit-production-data.mjs 2>&1 | tee /tmp/production-audit.log
 
       - name: Upload validation diagnostics
         if: always()
@@ -51,4 +55,5 @@ jobs:
           path: |
             /tmp/typecheck.log
             /tmp/javascript-check.log
+            /tmp/production-audit.log
           if-no-files-found: ignore
