@@ -1,56 +1,20 @@
 import { Router, type IRouter } from "express";
 import authRouter from "./auth";
 import healthRouter from "./health";
-import portfolioRouter from "./portfolio";
-import positionsRouter from "./positions";
-import watchlistRouter from "./watchlist";
 import quotesRouter from "./quotes";
-import quotesRefreshRouter from "./quotesRefresh";
-import marketSummaryRouter from "./marketSummary";
-import accountActivityRouter from "./accountActivity";
-import portfolioSummaryRouter from "./portfolioSummary";
-import optionsPositionsRouter from "./optionsPositions";
-import activityRouter from "./activity";
-import approvalsPendingRouter from "./approvalsPending";
-import alertsRouter from "./alerts";
-import aiOptionsAlertsRouter from "./aiOptionsAlerts";
-import aiCommandCenterRouter from "./aiCommandCenter";
-import analyticsRouter from "./analytics";
-import riskRouter from "./risk";
-import performanceRouter from "./performance";
-import aiTradesRouter from "./aiTrades";
-import notificationsRouter from "./notifications";
-import brokerConnectionsRouter from "./brokerConnections";
+import portfolioRouter from "./portfolio";
 import snapTradeSessionRouter from "./snaptradeSession";
 import snapTradeRouter from "./snaptrade";
-import brokerEngineRouter from "./brokerEngine";
 
 const router: IRouter = Router();
 
+// Production exposes only routes backed by real services or user-entered data.
+// Historical experimental routes remain in the repository but are not mounted.
 router.use(authRouter);
 router.use(healthRouter);
-router.use(portfolioRouter);
-router.use(positionsRouter);
-router.use(watchlistRouter);
 router.use(quotesRouter);
-router.use(quotesRefreshRouter);
-router.use(marketSummaryRouter);
-router.use(accountActivityRouter);
-router.use(portfolioSummaryRouter);
-router.use(optionsPositionsRouter);
-router.use(activityRouter);
-router.use(approvalsPendingRouter);
-router.use(alertsRouter);
-router.use(aiOptionsAlertsRouter);
-router.use(aiCommandCenterRouter);
-router.use(analyticsRouter);
-router.use(riskRouter);
-router.use(performanceRouter);
-router.use(aiTradesRouter);
-router.use(notificationsRouter);
-router.use(brokerConnectionsRouter);
+router.use(portfolioRouter);
 router.use(snapTradeSessionRouter);
 router.use(snapTradeRouter);
-router.use(brokerEngineRouter);
 
 export default router;
