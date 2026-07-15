@@ -32,7 +32,10 @@ jobs:
       - name: Type-check API
         run: |
           set -o pipefail
-          pnpm --filter @workspace/api-server typecheck 2>&1 | tee /tmp/typecheck.log
+          {
+            pnpm run typecheck:libs
+            pnpm --filter @workspace/api-server typecheck
+          } 2>&1 | tee /tmp/typecheck.log
 
       - name: Check deployed dashboard JavaScript
         if: always()
