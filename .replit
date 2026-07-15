@@ -37,7 +37,7 @@ externalPort = 3000
 USE_LIVE_DATA = "false"
 SNAPTRADE_CLIENT_ID = "PERS-H7NJ3E05XJGG7AF3VKJJ"
 NODE_ENV = "production"
-DASHBOARD_OWNER_EMAIL = ""
+DASHBOARD_OWNER_EMAIL = "forrestpbusiness@icloud.com"
 
 [nix]
 channel = "stable-25_05"
