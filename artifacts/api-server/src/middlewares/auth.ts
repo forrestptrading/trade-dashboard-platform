@@ -9,13 +9,17 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      /** Populated when a valid session cookie is present. */
+      /** Populated when a valid session cookie or bearer token is present. */
       user?: AuthUser;
     }
   }
 }
 
 function readToken(req: Request): string {
+  const authorization = req.get("authorization") ?? "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  if (bearer) return bearer;
+
   const cookies = (req as Request & { cookies?: Record<string, string> })
     .cookies;
   return cookies?.[SESSION_COOKIE_NAME] ?? "";
@@ -23,8 +27,7 @@ function readToken(req: Request): string {
 
 /**
  * Attaches `req.user` when a valid session exists, but never blocks the request.
- * Use this on routes that should keep working for anonymous users (e.g. the
- * existing data routes that fall back to mock/demo data).
+ * Use this on routes that should keep working for anonymous users.
  */
 export async function optionalAuth(
   req: Request,
@@ -43,9 +46,7 @@ export async function optionalAuth(
   next();
 }
 
-/**
- * Requires a valid session. Responds 401 and stops the chain when absent.
- */
+/** Requires a valid cookie or bearer session. */
 export async function requireAuth(
   req: Request,
   res: Response,
