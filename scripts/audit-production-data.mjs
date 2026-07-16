@@ -12,6 +12,7 @@ const productionFiles = new Set([
   "index.html",
   "script.js",
   "performance-data.js",
+  "resilient-data.js",
   "minute-refresh.js",
   ".github/workflows/pages.yml",
   "artifacts/api-server/src/app.ts",
@@ -127,11 +128,11 @@ if (!pagesWorkflow.includes("cp index.html style.css script.js _site/")) {
     value: "expected direct copy",
   });
 }
-if (!pagesWorkflow.includes("cat performance-data.js minute-refresh.js >> _site/script.js")) {
+if (!pagesWorkflow.includes("cat performance-data.js resilient-data.js minute-refresh.js >> _site/script.js")) {
   productionViolations.push({
     path: ".github/workflows/pages.yml",
     line: 1,
-    problem: "Connected performance and minute refresh modules are not included in the deployed bundle",
+    problem: "Connected performance, resilient refresh, and minute refresh modules are not included in the deployed bundle",
     value: "expected production module append",
   });
 }
