@@ -31,9 +31,9 @@ jobs:
         run: |
           mkdir -p _site
           cp index.html style.css script.js _site/
-          cat performance-data.js resilient-data.js portfolio-intelligence.js minute-refresh.js >> _site/script.js
+          cat performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js >> _site/script.js
           cp index.html _site/404.html
-          sed -i 's/script.js?v=11.1/script.js?v=11.5/g' _site/index.html _site/404.html
+          sed -i 's/script.js?v=11.1/script.js?v=11.6/g' _site/index.html _site/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
