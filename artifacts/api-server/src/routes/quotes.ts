@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { getBroker, useLiveData } from "../broker/index.js";
+import { getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -26,20 +26,15 @@ router.get("/quotes", async (req, res) => {
     return;
   }
 
-  if (!useLiveData()) {
-    res.status(503).json({
-      success: false,
-      error: "A live market-data provider is not enabled",
-    });
-    return;
-  }
-
   try {
     const broker = getBroker(req.query["broker"] as string | undefined);
-    if (!broker.isAuthenticated()) {
+
+    // Robinhood's quote endpoint is available without a private account token.
+    // Other registered providers may still require their own authenticated session.
+    if (broker.brokerId !== "robinhood" && !broker.isAuthenticated()) {
       res.status(503).json({
         success: false,
-        error: "The live market-data provider is not authenticated",
+        error: "The selected market-data provider is not authenticated",
       });
       return;
     }

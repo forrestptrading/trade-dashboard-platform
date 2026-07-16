@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import assistantRouter from "./assistant";
 import authRouter from "./auth";
 import healthRouter from "./health";
 import quotesRouter from "./quotes";
@@ -16,5 +17,6 @@ router.use(quotesRouter);
 router.use(portfolioRouter);
 router.use(snapTradeSessionRouter);
 router.use(snapTradeRouter);
+router.use(assistantRouter);
 
 export default router;

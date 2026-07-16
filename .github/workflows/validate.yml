@@ -45,9 +45,10 @@ jobs:
           node --check performance-data.js 2>&1 | tee -a /tmp/javascript-check.log
           node --check resilient-data.js 2>&1 | tee -a /tmp/javascript-check.log
           node --check portfolio-intelligence.js 2>&1 | tee -a /tmp/javascript-check.log
+          node --check ai-assistant.js 2>&1 | tee -a /tmp/javascript-check.log
           node --check minute-refresh.js 2>&1 | tee -a /tmp/javascript-check.log
           node --check scripts/audit-production-data.mjs 2>&1 | tee -a /tmp/javascript-check.log
-          cat script.js performance-data.js resilient-data.js portfolio-intelligence.js minute-refresh.js > /tmp/dashboard.js
+          cat script.js performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js > /tmp/dashboard.js
           node --check /tmp/dashboard.js 2>&1 | tee -a /tmp/javascript-check.log
           node -e 'const fs=require("fs"); const html=fs.readFileSync("index.html","utf8"); const blocks=[...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)]; for (const [,source] of blocks) new Function(source); console.log(`Validated ${blocks.length} inline script block(s).`);' 2>&1 | tee -a /tmp/javascript-check.log
 
