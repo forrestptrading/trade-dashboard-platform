@@ -14,11 +14,13 @@ const productionFiles = new Set([
   "performance-data.js",
   "resilient-data.js",
   "portfolio-intelligence.js",
+  "ai-assistant.js",
   "minute-refresh.js",
   ".github/workflows/pages.yml",
   "artifacts/api-server/src/app.ts",
   "artifacts/api-server/src/routes/index.ts",
   "artifacts/api-server/src/routes/auth.ts",
+  "artifacts/api-server/src/routes/assistant.ts",
   "artifacts/api-server/src/routes/health.ts",
   "artifacts/api-server/src/routes/quotes.ts",
   "artifacts/api-server/src/routes/portfolio.ts",
@@ -129,11 +131,11 @@ if (!pagesWorkflow.includes("cp index.html style.css script.js _site/")) {
     value: "expected direct copy",
   });
 }
-if (!pagesWorkflow.includes("cat performance-data.js resilient-data.js portfolio-intelligence.js minute-refresh.js >> _site/script.js")) {
+if (!pagesWorkflow.includes("cat performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js >> _site/script.js")) {
   productionViolations.push({
     path: ".github/workflows/pages.yml",
     line: 1,
-    problem: "Connected performance, resilient refresh, portfolio intelligence, and minute refresh modules are not included in the deployed bundle",
+    problem: "Connected performance, resilient refresh, portfolio intelligence, AI assistant, and minute refresh modules are not included in the deployed bundle",
     value: "expected production module append",
   });
 }
