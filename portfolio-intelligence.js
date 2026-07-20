@@ -45,28 +45,33 @@
         gap: 14px;
       }
       .intelligence-card {
-        background: #fff;
-        border: 1px solid var(--border);
+        background: linear-gradient(145deg, var(--surface, #2a171d), var(--card, #211116));
+        color: var(--text, #f7eef0);
+        border: 1px solid var(--border, #4a252f);
         border-radius: 14px;
         padding: 16px;
         min-width: 0;
+        box-shadow: 0 10px 24px rgba(0,0,0,.18);
       }
       .intelligence-card > span {
         display: block;
+        color: var(--muted, #c8aeb4);
         font-size: 13px;
         margin-bottom: 8px;
-        opacity: .7;
+        opacity: 1;
       }
       .intelligence-card > strong {
         display: block;
+        color: var(--text, #f7eef0);
         font-size: 22px;
         margin-bottom: 6px;
         overflow-wrap: anywhere;
       }
       .intelligence-card small {
         display: block;
+        color: var(--muted, #c8aeb4);
         line-height: 1.4;
-        opacity: .7;
+        opacity: 1;
       }
       .allocation-meter,
       .goal-meter {
@@ -74,15 +79,16 @@
         height: 10px;
         margin: 12px 0 8px;
         overflow: hidden;
+        border: 1px solid var(--border, #4a252f);
         border-radius: 999px;
-        background: #eadfce;
+        background: #14090d;
       }
       .allocation-invested,
       .goal-meter-fill {
-        background: var(--accent);
+        background: linear-gradient(90deg, var(--accent, #a92d40), var(--accent-hover, #c53b50));
       }
       .allocation-cash {
-        background: var(--green);
+        background: var(--green, #4dd47a);
       }
       .goal-meter-fill,
       .allocation-invested,
@@ -94,6 +100,7 @@
         display: flex;
         justify-content: space-between;
         gap: 10px;
+        color: var(--muted, #c8aeb4);
         font-size: 12px;
       }
       @media (max-width: 600px) {
