@@ -30,11 +30,21 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir -p _site
-          cp index.html style.css script.js _site/
+          cp index.html style.css script.js ui-polish.js _site/
           cat performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js >> _site/script.js
-          cat ui-polish.js >> _site/script.js
           cp index.html _site/404.html
-          sed -i 's/script.js?v=11.1/script.js?v=11.8/g' _site/index.html _site/404.html
+          sed -i 's/script.js?v=11.1/script.js?v=11.9/g' _site/index.html _site/404.html
+          python - <<'PY'
+          from pathlib import Path
+
+          tag = '  <script src="ui-polish.js?v=2.0"></script>\n'
+          for name in ("index.html", "404.html"):
+              path = Path("_site") / name
+              html = path.read_text()
+              if "ui-polish.js" not in html:
+                  html = html.replace("</body>", f"{tag}</body>")
+              path.write_text(html)
+          PY
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
