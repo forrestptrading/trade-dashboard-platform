@@ -34,7 +34,7 @@ jobs:
           cat performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js >> _site/script.js
           cat ui-polish.js >> _site/script.js
           cp index.html _site/404.html
-          sed -i 's/script.js?v=11.1/script.js?v=11.7/g' _site/index.html _site/404.html
+          sed -i 's/script.js?v=11.1/script.js?v=11.8/g' _site/index.html _site/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
