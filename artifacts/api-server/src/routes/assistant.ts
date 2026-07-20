@@ -16,6 +16,8 @@ const MAX_MESSAGE_LENGTH = 2_000;
 const MAX_HISTORY_ITEMS = 8;
 const MAX_SYMBOLS = 12;
 const MAX_HOLDINGS = 30;
+const MAX_OUTPUT_TOKENS = 2_500;
+const OPENAI_TIMEOUT_MS = 90_000;
 
 type JsonObject = Record<string, unknown>;
 type ConversationItem = { role: "user" | "assistant"; content: string };
@@ -277,10 +279,11 @@ router.post(
           model: modelName(),
           instructions,
           input,
-          max_output_tokens: 700,
+          reasoning: { effort: "low" },
+          max_output_tokens: MAX_OUTPUT_TOKENS,
           store: false,
         }),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS),
       });
 
       const responseText = await openAIResponse.text();
@@ -310,7 +313,10 @@ router.post(
 
       const answer = extractResponseText(responseData);
       if (!answer) {
-        throw new Error("The AI service returned no text output");
+        const responseObject = asRecord(responseData);
+        const incompleteDetails = asRecord(responseObject["incomplete_details"]);
+        const reason = text(incompleteDetails["reason"], 120) || "no text output";
+        throw new Error(`The AI service returned no text output (${reason})`);
       }
 
       const responseObject = asRecord(responseData);
