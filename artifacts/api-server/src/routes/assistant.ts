@@ -18,9 +18,16 @@ const MAX_SYMBOLS = 12;
 const MAX_HOLDINGS = 30;
 const MAX_OUTPUT_TOKENS = 2_500;
 const OPENAI_TIMEOUT_MS = 90_000;
+const BENCHMARK_SYMBOLS = ["SPY", "QQQ", "IWM"] as const;
+const WIDE_SPREAD_PERCENT = 0.5;
+const CURRENT_QUOTE_SECONDS = 120;
+const STALE_QUOTE_SECONDS = 600;
 
 type JsonObject = Record<string, unknown>;
 type ConversationItem = { role: "user" | "assistant"; content: string };
+type MarketSession = "regular" | "pre-market" | "after-hours" | "closed" | "unknown";
+type QuoteFreshness = "current" | "aging" | "stale" | "unknown";
+type QuoteQuality = "clean" | "caution" | "unreliable";
 
 type NormalizedQuote = {
   symbol: string;
@@ -31,6 +38,26 @@ type NormalizedQuote = {
   bidPrice: number | null;
   askPrice: number | null;
   timestamp: string | null;
+};
+
+type MarketClock = {
+  session: MarketSession;
+  eastern_time: string;
+  scheduled_market_day: boolean;
+  holiday_calendar_checked: false;
+  note: string;
+};
+
+type AnalyzedQuote = NormalizedQuote & {
+  ageSeconds: number | null;
+  freshness: QuoteFreshness;
+  spread: number | null;
+  spreadPercent: number | null;
+  lastWithinBidAsk: boolean | null;
+  quoteQuality: QuoteQuality;
+  qualityFlags: string[];
+  usableForDirectionalContext: boolean;
+  eligibleForEntryLevels: boolean;
 };
 
 function asRecord(value: unknown): JsonObject {
@@ -94,6 +121,14 @@ function sanitizeSymbols(value: unknown): string[] {
   )].slice(0, MAX_SYMBOLS);
 }
 
+function buildContextSymbols(requestedSymbols: string[]): string[] {
+  const benchmarks = new Set<string>(BENCHMARK_SYMBOLS);
+  const userSymbols = requestedSymbols
+    .filter((symbol) => !benchmarks.has(symbol))
+    .slice(0, MAX_SYMBOLS - BENCHMARK_SYMBOLS.length);
+  return [...new Set([...userSymbols, ...BENCHMARK_SYMBOLS])];
+}
+
 function sanitizeHistory(value: unknown): ConversationItem[] {
   return asArray(value)
     .map((item) => {
@@ -112,7 +147,7 @@ function sanitizePortfolio(value: unknown): JsonObject {
   const holdings = asArray(portfolio["holdings"])
     .map((item) => {
       const holding = asRecord(item);
-      const symbol = text(holding["symbol"], 20).toUpperCase();
+      const symbol = text(holding["symbol"], 40).toUpperCase();
       if (!symbol) return null;
       return {
         symbol,
@@ -138,6 +173,51 @@ function sanitizePortfolio(value: unknown): JsonObject {
     retrieved_at: text(portfolio["retrieved_at"], 80) || null,
     holdings,
   };
+}
+
+function getEasternClock(now: Date): MarketClock {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const hour = Number(values["hour"]);
+    const minute = Number(values["minute"]);
+    const weekday = values["weekday"] || "";
+    const minuteOfDay = hour * 60 + minute;
+    const scheduledMarketDay = !["Sat", "Sun"].includes(weekday);
+    let session: MarketSession = "closed";
+
+    if (scheduledMarketDay) {
+      if (minuteOfDay >= 240 && minuteOfDay < 570) session = "pre-market";
+      else if (minuteOfDay >= 570 && minuteOfDay < 960) session = "regular";
+      else if (minuteOfDay >= 960 && minuteOfDay < 1_200) session = "after-hours";
+    }
+
+    return {
+      session,
+      eastern_time: `${values["year"]}-${values["month"]}-${values["day"]}T${values["hour"]}:${values["minute"]}:${values["second"]} America/New_York`,
+      scheduled_market_day: scheduledMarketDay,
+      holiday_calendar_checked: false,
+      note: "Session is based on weekday and Eastern clock only. Exchange holidays, early closes, and trading halts are not verified.",
+    };
+  } catch {
+    return {
+      session: "unknown",
+      eastern_time: now.toISOString(),
+      scheduled_market_day: false,
+      holiday_calendar_checked: false,
+      note: "Market session could not be classified. Treat every setup as unconfirmed.",
+    };
+  }
 }
 
 async function fetchQuotes(symbols: string[]): Promise<NormalizedQuote[]> {
@@ -172,6 +252,94 @@ async function fetchQuotes(symbols: string[]): Promise<NormalizedQuote[]> {
     .filter((quote): quote is NormalizedQuote => Boolean(quote));
 }
 
+function analyzeQuote(
+  quote: NormalizedQuote,
+  generatedAt: Date,
+  marketSession: MarketSession,
+): AnalyzedQuote {
+  const quoteTime = quote.timestamp ? new Date(quote.timestamp) : null;
+  const ageSeconds = quoteTime && !Number.isNaN(quoteTime.getTime())
+    ? Math.max(0, Math.round((generatedAt.getTime() - quoteTime.getTime()) / 1_000))
+    : null;
+  const freshness: QuoteFreshness = ageSeconds === null
+    ? "unknown"
+    : ageSeconds <= CURRENT_QUOTE_SECONDS
+      ? "current"
+      : ageSeconds <= STALE_QUOTE_SECONDS
+        ? "aging"
+        : "stale";
+
+  const hasBidAsk = quote.bidPrice !== null && quote.askPrice !== null;
+  const crossedBidAsk = hasBidAsk && quote.bidPrice! > quote.askPrice!;
+  const spread = hasBidAsk && !crossedBidAsk
+    ? Math.max(0, quote.askPrice! - quote.bidPrice!)
+    : null;
+  const midpoint = hasBidAsk && !crossedBidAsk
+    ? (quote.askPrice! + quote.bidPrice!) / 2
+    : null;
+  const spreadPercent = spread !== null && midpoint && midpoint > 0
+    ? (spread / midpoint) * 100
+    : null;
+  const lastWithinBidAsk = hasBidAsk && !crossedBidAsk
+    ? quote.price >= quote.bidPrice! && quote.price <= quote.askPrice!
+    : null;
+
+  const qualityFlags: string[] = [];
+  if (!quote.timestamp) qualityFlags.push("missing_timestamp");
+  if (freshness === "stale") qualityFlags.push("stale_quote");
+  if (!hasBidAsk) qualityFlags.push("missing_bid_ask");
+  if (crossedBidAsk) qualityFlags.push("crossed_bid_ask");
+  if (lastWithinBidAsk === false) qualityFlags.push("last_outside_bid_ask");
+  if (spreadPercent !== null && spreadPercent > WIDE_SPREAD_PERCENT) {
+    qualityFlags.push("wide_spread");
+  }
+
+  const unreliableFlags = new Set([
+    "missing_timestamp",
+    "stale_quote",
+    "crossed_bid_ask",
+  ]);
+  const quoteQuality: QuoteQuality = qualityFlags.some((flag) => unreliableFlags.has(flag))
+    ? "unreliable"
+    : qualityFlags.length
+      ? "caution"
+      : "clean";
+  const usableForDirectionalContext =
+    freshness !== "stale" && quote.previousClose !== null && quote.changePercent !== null;
+  const eligibleForEntryLevels =
+    marketSession === "regular" &&
+    freshness === "current" &&
+    lastWithinBidAsk === true &&
+    !crossedBidAsk &&
+    spreadPercent !== null &&
+    spreadPercent <= WIDE_SPREAD_PERCENT;
+
+  return {
+    ...quote,
+    ageSeconds,
+    freshness,
+    spread,
+    spreadPercent,
+    lastWithinBidAsk,
+    quoteQuality,
+    qualityFlags,
+    usableForDirectionalContext,
+    eligibleForEntryLevels,
+  };
+}
+
+function summarizeQuoteQuality(quotes: AnalyzedQuote[]): JsonObject {
+  return {
+    total: quotes.length,
+    clean: quotes.filter((quote) => quote.quoteQuality === "clean").length,
+    caution: quotes.filter((quote) => quote.quoteQuality === "caution").length,
+    unreliable: quotes.filter((quote) => quote.quoteQuality === "unreliable").length,
+    stale: quotes.filter((quote) => quote.freshness === "stale").length,
+    last_outside_bid_ask: quotes.filter((quote) => quote.lastWithinBidAsk === false).length,
+    entry_level_eligible: quotes.filter((quote) => quote.eligibleForEntryLevels).length,
+  };
+}
+
 function extractResponseText(value: unknown): string {
   const response = asRecord(value);
   const parts: string[] = [];
@@ -199,6 +367,7 @@ router.get(
       configured: configured(),
       model: modelName(),
       read_only: true,
+      accuracy_mode: "trade-readiness-v2",
     });
   },
 );
@@ -224,40 +393,67 @@ router.post(
       return;
     }
 
-    const symbols = sanitizeSymbols(body["symbols"]);
+    const requestedSymbols = sanitizeSymbols(body["symbols"]);
+    const contextSymbols = buildContextSymbols(requestedSymbols);
     const history = sanitizeHistory(body["history"]);
     const portfolio = sanitizePortfolio(body["portfolio"]);
+    const generatedAt = new Date();
+    const marketClock = getEasternClock(generatedAt);
 
-    let quotes: NormalizedQuote[] = [];
+    let rawQuotes: NormalizedQuote[] = [];
     let quoteError: string | null = null;
     try {
-      quotes = await fetchQuotes(symbols);
+      rawQuotes = await fetchQuotes(contextSymbols);
     } catch (error) {
       quoteError = error instanceof Error ? error.message : "Live quote request failed";
       logger.warn({ err: quoteError }, "[assistant] live quote context unavailable");
     }
 
+    const quotes = rawQuotes.map((quote) => analyzeQuote(quote, generatedAt, marketClock.session));
     const dashboardContext = {
-      generated_at: new Date().toISOString(),
+      generated_at: generatedAt.toISOString(),
+      market_clock: marketClock,
       quote_source: quotes.length ? "robinhood" : null,
       quote_status: quotes.length
-        ? "Live quote response received"
+        ? "Timestamped quote response received"
         : quoteError
-          ? "Live quote response unavailable"
+          ? "Quote response unavailable"
           : "No symbols requested",
+      requested_symbols: requestedSymbols,
+      benchmark_symbols: BENCHMARK_SYMBOLS,
+      quote_quality_summary: summarizeQuoteQuality(quotes),
       quotes,
       portfolio,
+      unavailable_inputs: [
+        "candlestick charts",
+        "intraday volume and relative volume",
+        "news and earnings catalysts",
+        "economic calendar",
+        "market-wide scanner",
+        "options chains and premiums",
+        "implied volatility and option Greeks",
+        "order flow and time-and-sales",
+      ],
     };
 
     const instructions = [
       "You are the read-only trading research assistant inside Forrest's private dashboard.",
-      "Use the supplied dashboard context as the only source for current prices, balances, holdings, and timestamps.",
-      "Never claim a price is live when no timestamped quote was supplied.",
-      "Clearly separate observed data from your interpretation.",
+      "Use the supplied dashboard context as the only source for prices, balances, holdings, timestamps, and market-session classification.",
+      "Never imply access to charts, candles, volume, order flow, news, earnings, economic events, option chains, option premiums, implied volatility, or Greeks unless those values are explicitly supplied.",
+      "Always distinguish observed data from interpretation and state when evidence is insufficient.",
+      "For any request involving a callout, trade idea, tomorrow's plan, entry, stop, target, or scanner, begin with a short Data Readiness section covering market session, timestamp freshness, bid-ask consistency, and major quality flags.",
+      "Premarket, after-hours, closed-session, unknown-session, stale, crossed, or last-outside-bid-ask quotes may be used only as reference context. They cannot establish actionable entries, stops, targets, support, resistance, breakouts, breakdowns, or confirmed momentum.",
+      "Do not treat a bid, ask, previous close, or after-hours print as a technical level. Do not invent candles, sustained prints, opening ranges, pivots, or chart structure.",
+      "Use the label watch candidate unless the market session is regular and the relevant quote has eligibleForEntryLevels=true. Even then, every idea must remain conditional and require confirmation.",
+      "When quote fields conflict, downgrade confidence or say no valid setup. Never repair conflicting values by guessing which field is correct.",
+      "SPY, QQQ, and IWM are benchmark context. Do not present them as user watchlist selections unless they also appear in requested_symbols.",
+      "Provide no more than two trade candidates unless the user explicitly requests more. It is acceptable and often preferable to return no valid setup.",
+      "For each candidate include observed facts, bias or watch thesis, confirmation condition, invalidation condition, missing data, and confidence level. Do not provide exact entry, stop, or target prices from the current data alone.",
+      "Respect portfolio constraints. Do not recommend share quantities whose cost exceeds reported buying power. Do not recommend short selling when margin and borrow availability are unknown. Do not recommend a specific option contract without a current option chain, premium, spread, expiration, implied volatility, and Greeks.",
+      "For options already held, call out expiration risk, leverage, liquidity uncertainty, and maximum-loss uncertainty when cost basis is missing.",
       "Do not promise returns, guarantee outcomes, or claim certainty about future market direction.",
-      "For options, call out expiration risk, leverage, and maximum loss when relevant.",
       "You cannot place, modify, approve, or cancel trades. Never imply that you performed an order action.",
-      "Keep answers practical and concise. State plainly when required data is unavailable.",
+      "Keep answers practical, structured, and concise.",
     ].join(" ");
 
     const input = [
@@ -330,7 +526,10 @@ router.post(
           quote_count: quotes.length,
           quote_symbols: quotes.map((quote) => quote.symbol),
           generated_at: dashboardContext.generated_at,
+          market_session: marketClock.session,
+          quote_quality_summary: dashboardContext.quote_quality_summary,
           read_only: true,
+          accuracy_mode: "trade-readiness-v2",
         },
       });
     } catch (error) {
