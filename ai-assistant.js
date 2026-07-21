@@ -134,6 +134,7 @@
     delayed: "Delayed",
     plan_restricted: "Not in data plan",
     request_failed: "Request failed",
+    skipped: "Skipped (in scope, no setup)",
     not_requested: "Not requested at this stage"
   };
 

@@ -1038,6 +1038,7 @@ export type StageStatusLabel =
   | "delayed"
   | "plan_restricted"
   | "request_failed"
+  | "skipped"
   | "not_requested";
 
 export interface StageStatus {
@@ -1404,8 +1405,8 @@ export async function enrichMarketScan(
         data_notes: ["Neutral intraday direction — no directional contract type was selected."],
       };
       candidate.enrichment_status.options = {
-        status: "not_requested",
-        detail: "Neutral intraday direction — no directional contract type was selected, so the chain was not requested.",
+        status: "skipped",
+        detail: "In options scope, but the intraday direction is neutral — no directional contract type was selected, so the chain was not requested.",
       };
       continue;
     }
