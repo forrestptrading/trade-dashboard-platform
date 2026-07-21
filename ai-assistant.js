@@ -128,12 +128,27 @@
     return line;
   }
 
+  const STAGE_STATUS_LABELS = {
+    available: "Available",
+    available_robinhood_fallback: "Available (Robinhood quote fallback)",
+    delayed: "Delayed",
+    plan_restricted: "Not in data plan",
+    request_failed: "Request failed",
+    not_requested: "Not requested at this stage"
+  };
+
+  function stageStatusText(entry) {
+    if (!entry || !entry.status) return "Status unknown";
+    return STAGE_STATUS_LABELS[entry.status] || entry.status;
+  }
+
   function buildLiveSection(candidate) {
     const snapshot = candidate.live_snapshot;
+    const quote = candidate.live_quote;
     const intraday = candidate.intraday;
     const news = candidate.news;
     const options = candidate.options;
-    if (!snapshot && !intraday && !news && !options) return null;
+    const statuses = candidate.enrichment_status || null;
 
     const section = document.createElement("div");
     section.className = "market-scan-live";
@@ -151,8 +166,26 @@
       if (snapshot.data_timestamp) {
         section.appendChild(liveLine("As of", new Date(snapshot.data_timestamp).toLocaleTimeString()));
       }
+    } else if (quote && quote.source === "robinhood_quote_fallback" && quote.current_price !== null) {
+      section.appendChild(liveLine("Live price (Robinhood)", `${formatMoney(quote.current_price)}`));
+      if (Number.isFinite(Number(quote.todays_change_percent))) {
+        section.appendChild(liveLine("Today", formatPercent(quote.todays_change_percent)));
+      }
+      if (quote.bid !== null && quote.ask !== null) {
+        const spreadText = quote.spread_percent !== null && quote.spread_percent !== undefined
+          ? ` (spread ${Number(quote.spread_percent).toFixed(2)}%)`
+          : "";
+        section.appendChild(liveLine("Bid / Ask", `${formatMoney(quote.bid)} / ${formatMoney(quote.ask)}${spreadText}`));
+      }
+      section.appendChild(liveLine("Volume", "Not part of the Robinhood quote"));
+      if (quote.data_timestamp) {
+        section.appendChild(liveLine("As of", new Date(quote.data_timestamp).toLocaleTimeString()));
+      }
+      if (quote.trading_halted) {
+        section.appendChild(liveLine("Trading", "HALTED"));
+      }
     } else {
-      section.appendChild(liveLine("Live price", "Snapshot unavailable"));
+      section.appendChild(liveLine("Live price", "Unavailable"));
     }
 
     if (intraday) {
@@ -214,6 +247,26 @@
       }
     }
 
+    if (statuses) {
+      const statusBox = document.createElement("div");
+      statusBox.className = "market-scan-note market-scan-stage-status";
+      const parts = [];
+      const quoteEntry = statuses.live_quote;
+      if (quoteEntry && quoteEntry.status !== "not_requested") {
+        parts.push(`Quote: ${stageStatusText(quoteEntry)}`);
+      }
+      parts.push(`Snapshot: ${stageStatusText(statuses.snapshot)}`);
+      parts.push(`Intraday: ${stageStatusText(statuses.intraday)}`);
+      parts.push(`News: ${stageStatusText(statuses.news)}`);
+      parts.push(`Options: ${stageStatusText(statuses.options)}`);
+      statusBox.textContent = parts.join(" · ");
+      const details = ["snapshot", "intraday", "news", "options"]
+        .map((stage) => statuses[stage] && statuses[stage].detail ? `${stage}: ${statuses[stage].detail}` : null)
+        .filter(Boolean);
+      if (details.length) statusBox.title = details.join("\n");
+      section.appendChild(statusBox);
+    }
+
     const noteTexts = []
       .concat(Array.isArray(candidate.data_quality_notes) ? candidate.data_quality_notes : [])
       .concat(intraday && Array.isArray(intraday.data_notes) ? intraday.data_notes : []);
@@ -245,10 +298,15 @@
     detail.textContent = `${Number(scan.eligible_after_filters || 0).toLocaleString()} passed the trend and liquidity filters. Historical data through ${scan.data_through || "unavailable"}.`;
     const liveDetail = document.createElement("div");
     const sessionText = scan.market_session ? `Market session: ${scan.market_session}.` : "";
-    liveDetail.textContent = `${Number(scan.snapshot_candidates_reviewed || 0)} snapshots, ${Number(scan.intraday_candidates_reviewed || 0)} intraday, ${Number(scan.news_candidates_reviewed || 0)} news, ${Number(scan.options_candidates_reviewed || 0)} options chains reviewed. ${sessionText}${scan.live_data_as_of ? ` Live data as of ${new Date(scan.live_data_as_of).toLocaleTimeString()}.` : ""}`;
+    liveDetail.textContent = `${Number(scan.snapshot_candidates_reviewed || 0)} snapshots, ${Number(scan.intraday_candidates_reviewed || 0)} intraday, ${Number(scan.news_candidates_reviewed || 0)} news, ${Number(scan.options_candidates_reviewed || 0)} options chains reviewed. ${sessionText}${scan.live_data_as_of ? ` Live data as of ${new Date(scan.live_data_as_of).toLocaleTimeString()}.` : ""}${scan.quote_fallback_used ? " Live prices supplied by the Robinhood quote fallback (Massive snapshots are plan-restricted)." : ""}`;
+    const scopeDetail = document.createElement("div");
+    if (scan.stage_scope) {
+      const scope = scan.stage_scope;
+      scopeDetail.textContent = `Pipeline scope: snapshots attempted for the top ${Number(scope.snapshot_attempts || 0)}, intraday for the top ${Number(scope.intraday_attempts || 0)}, news for the final ${Number(scope.news_attempts || 0)}, options for the final ${Number(scope.options_attempts || 0)}. "Not requested at this stage" means a candidate ranked below that stage's cutoff — it is not a data failure.`;
+    }
     const method = document.createElement("div");
     method.textContent = scan.confidence_method || "Confidence method unavailable.";
-    summary.append(title, detail, liveDetail, method);
+    summary.append(title, detail, liveDetail, scopeDetail, method);
     if (Array.isArray(scan.unavailable_capabilities) && scan.unavailable_capabilities.length) {
       const caps = document.createElement("div");
       caps.textContent = `Unavailable on the current data plan: ${scan.unavailable_capabilities.map((item) => `${item.capability} (${item.reason})`).join("; ")}`;
@@ -308,7 +366,7 @@
 
     const warning = document.createElement("div");
     warning.className = "market-scan-warning";
-    warning.textContent = "Confidence, intraday setup, and option scores are deterministic backend calculations, not probabilities of profit. Live enrichment (snapshots, intraday levels, news, and option chains) covers only the top-ranked candidates; anything marked unavailable was genuinely not returned by the data provider.";
+    warning.textContent = "Confidence, intraday setup, and option scores are deterministic backend calculations, not probabilities of profit. Live enrichment covers only the top-ranked candidates by design: 'Not requested at this stage' means the candidate ranked below that stage's cutoff, 'Not in data plan' means the data plan blocks it, and 'Request failed' means a real error. Robinhood-fallback quotes are live quotes, not Massive snapshot data.";
 
     const actions = document.createElement("div");
     actions.className = "market-scan-actions";

@@ -1,4 +1,5 @@
 import { logger } from "./logger.js";
+import { getBroker } from "../broker/index.js";
 
 /**
  * Live enrichment pipeline for the full-market scanner (Stage 2+).
@@ -273,6 +274,47 @@ async function fetchStockSnapshot(symbol: string, apiKey: string): Promise<LiveS
     delayed,
     unavailable_fields: unavailable,
   };
+}
+
+/**
+ * Fetch live quotes for a batch of symbols through the dashboard's existing
+ * Robinhood quote provider. Used only when Massive stock snapshots are
+ * plan-restricted; provenance is explicitly labeled on every object.
+ */
+async function fetchQuoteFallbacks(symbols: string[]): Promise<Map<string, QuoteFallback>> {
+  const map = new Map<string, QuoteFallback>();
+  if (!symbols.length) return map;
+  const broker = getBroker("robinhood");
+  const quotes = await broker.getQuotes(symbols);
+  for (const quote of quotes) {
+    if (!quote || typeof quote.symbol !== "string") continue;
+    const price = optionalNumber(quote.last_trade_price);
+    const prevClose = optionalNumber(quote.previous_close);
+    const bid = optionalNumber(quote.bid_price);
+    const ask = optionalNumber(quote.ask_price);
+    const spread = bid !== null && ask !== null && ask > 0 ? round(ask - bid, 4) : null;
+    const mid = bid !== null && ask !== null ? (bid + ask) / 2 : null;
+    const change = price !== null && prevClose !== null ? round(price - prevClose, 4) : null;
+    map.set(quote.symbol.toUpperCase(), {
+      source: "robinhood_quote_fallback",
+      current_price: price,
+      previous_close: prevClose,
+      todays_change: change,
+      todays_change_percent:
+        change !== null && prevClose !== null && prevClose !== 0
+          ? round((change / prevClose) * 100, 2)
+          : null,
+      bid,
+      ask,
+      spread_amount: spread,
+      spread_percent: spread !== null && mid !== null && mid > 0 ? round((spread / mid) * 100, 2) : null,
+      data_timestamp: typeof quote.updated_at === "string" && quote.updated_at ? quote.updated_at : null,
+      volume: null,
+      delayed: false,
+      trading_halted: Boolean(quote.trading_halted),
+    });
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -969,14 +1011,66 @@ export interface HistoricalCandidateLike {
   confidence_meter: number;
 }
 
+/**
+ * Live quote fetched from the dashboard's existing Robinhood quote provider.
+ * Used only as a clearly-labeled fallback when Massive stock snapshots are
+ * plan-restricted. Never presented as a Massive snapshot.
+ */
+export interface QuoteFallback {
+  source: "robinhood_quote_fallback";
+  current_price: number | null;
+  previous_close: number | null;
+  todays_change: number | null;
+  todays_change_percent: number | null;
+  bid: number | null;
+  ask: number | null;
+  spread_amount: number | null;
+  spread_percent: number | null;
+  data_timestamp: string | null;
+  volume: null;
+  delayed: boolean;
+  trading_halted: boolean;
+}
+
+export type StageStatusLabel =
+  | "available"
+  | "available_robinhood_fallback"
+  | "delayed"
+  | "plan_restricted"
+  | "request_failed"
+  | "not_requested";
+
+export interface StageStatus {
+  status: StageStatusLabel;
+  detail: string | null;
+}
+
+export interface EnrichmentStatus {
+  live_quote: StageStatus;
+  snapshot: StageStatus;
+  intraday: StageStatus;
+  news: StageStatus;
+  options: StageStatus;
+}
+
 export interface EnrichedCandidate extends HistoricalCandidateLike {
   live_snapshot: LiveSnapshot | null;
+  live_quote: QuoteFallback | null;
   intraday: IntradayTechnicals | null;
   news: NewsEnrichment | null;
   options: OptionsEnrichment | null;
   enrichment_stage: "historical" | "snapshot" | "intraday" | "news" | "options";
+  enrichment_status: EnrichmentStatus;
   data_quality_notes: string[];
   unavailable_fields: string[];
+}
+
+export interface StageScope {
+  snapshot_attempts: number;
+  intraday_attempts: number;
+  news_attempts: number;
+  options_attempts: number;
+  description: string;
 }
 
 export interface LiveEnrichmentResult {
@@ -989,6 +1083,8 @@ export interface LiveEnrichmentResult {
   live_data_as_of: string | null;
   market_session: MarketSession;
   unavailable_capabilities: CapabilityFailure[];
+  stage_scope: StageScope;
+  quote_fallback_used: boolean;
   candidates: EnrichedCandidate[];
 }
 
@@ -1047,13 +1143,25 @@ export async function enrichMarketScan(
 
   // Stage 2 — snapshots for the top 25 historical candidates.
   const snapshotTargets = historicalCandidates.slice(0, config.snapshotCandidates);
+  const notRequested = (stage: string): StageStatus => ({
+    status: "not_requested",
+    detail: `Not requested at this ranking stage (${stage}).`,
+  });
   const enriched: EnrichedCandidate[] = snapshotTargets.map((candidate) => ({
     ...candidate,
     live_snapshot: null,
+    live_quote: null,
     intraday: null,
     news: null,
     options: null,
     enrichment_stage: "historical",
+    enrichment_status: {
+      live_quote: notRequested("quote fallback runs only when Massive snapshots are restricted"),
+      snapshot: notRequested(`snapshots go to the top ${config.snapshotCandidates}`),
+      intraday: notRequested(`intraday goes to the top ${config.intradayCandidates}`),
+      news: notRequested(`news goes to the final ${config.newsCandidates}`),
+      options: notRequested(`options go to the final ${config.optionsCandidates}`),
+    },
     data_quality_notes: [],
     unavailable_fields: [],
   }));
@@ -1062,12 +1170,16 @@ export async function enrichMarketScan(
   const snapshotResults = await Promise.all(
     enriched.map((candidate) => settle(fetchStockSnapshot(candidate.symbol, apiKey))),
   );
+  let snapshotPlanRestricted = false;
   snapshotResults.forEach((result, index) => {
     const candidate = enriched[index]!;
     if (result.ok) {
       candidate.live_snapshot = result.value;
       candidate.enrichment_stage = "snapshot";
       candidate.unavailable_fields.push(...result.value.unavailable_fields);
+      candidate.enrichment_status.snapshot = result.value.delayed
+        ? { status: "delayed", detail: "Massive snapshot data is delayed on the current plan." }
+        : { status: "available", detail: null };
       if (result.value.delayed) {
         candidate.data_quality_notes.push("Live snapshot data is delayed on the current Massive plan.");
       }
@@ -1075,12 +1187,58 @@ export async function enrichMarketScan(
       const failure = capabilityFromError("stock_snapshot", result.error);
       candidate.data_quality_notes.push(`Live snapshot unavailable: ${failure.reason}`);
       candidate.unavailable_fields.push("live_snapshot");
+      candidate.enrichment_status.snapshot = failure.plan_restricted
+        ? { status: "plan_restricted", detail: failure.reason }
+        : { status: "request_failed", detail: failure.reason };
+      if (failure.plan_restricted) snapshotPlanRestricted = true;
       if (failure.plan_restricted && !snapshotCapabilityDown) {
         snapshotCapabilityDown = true;
         unavailableCapabilities.push(failure);
       }
     }
   });
+
+  // Robinhood live-quote fallback: only when Massive snapshots are
+  // plan-restricted. Provenance is preserved — this is never presented as a
+  // Massive snapshot, and it supplies no volume, VWAP, candles, or options.
+  let quoteFallbackUsed = false;
+  if (snapshotPlanRestricted) {
+    const fallbackSymbols = enriched
+      .filter((candidate) => candidate.live_snapshot === null)
+      .map((candidate) => candidate.symbol);
+    const fallbackResult = await settle(fetchQuoteFallbacks(fallbackSymbols));
+    if (fallbackResult.ok) {
+      for (const candidate of enriched) {
+        if (candidate.live_snapshot !== null) continue;
+        const quote = fallbackResult.value.get(candidate.symbol.toUpperCase()) ?? null;
+        if (quote && quote.current_price !== null) {
+          candidate.live_quote = quote;
+          quoteFallbackUsed = true;
+          candidate.enrichment_status.live_quote = {
+            status: "available_robinhood_fallback",
+            detail: "Live quote supplied by the Robinhood quote provider because Massive snapshots are plan-restricted. Volume, VWAP, and candles are not part of this quote.",
+          };
+          candidate.data_quality_notes.push(
+            "Live price is from the Robinhood quote fallback, not a Massive snapshot.",
+          );
+        } else {
+          candidate.enrichment_status.live_quote = {
+            status: "request_failed",
+            detail: "The Robinhood quote fallback returned no usable quote for this symbol.",
+          };
+        }
+      }
+    } else {
+      const reason = fallbackResult.error instanceof Error
+        ? fallbackResult.error.message.slice(0, 200)
+        : String(fallbackResult.error).slice(0, 200);
+      for (const candidate of enriched) {
+        if (candidate.live_snapshot !== null) continue;
+        candidate.enrichment_status.live_quote = { status: "request_failed", detail: reason };
+      }
+      logger.warn({ err: reason }, "[market-scan] robinhood quote fallback failed");
+    }
+  }
   if (!snapshotCapabilityDown) {
     const allFailed = snapshotResults.length > 0 && snapshotResults.every((result) => !result.ok);
     if (allFailed) {
@@ -1129,23 +1287,33 @@ export async function enrichMarketScan(
     if (result.ok) {
       candidate.intraday = computeIntradayTechnicals(
         result.value,
-        candidate.live_snapshot?.current_price ?? null,
+        candidate.live_snapshot?.current_price ?? candidate.live_quote?.current_price ?? null,
       );
       candidate.intraday.session_date = result.sessionDate;
       candidate.enrichment_stage = "intraday";
       if (result.fallback) {
+        candidate.enrichment_status.intraday = {
+          status: "plan_restricted",
+          detail: `Same-day candles are plan-restricted; technicals use the last completed session (${result.sessionDate}).`,
+        };
         candidate.intraday.data_notes.push(
           `Same-day 5-minute candles are not included in the current Massive plan; these technicals use the last completed session (${result.sessionDate}). Levels are reference context, not live intraday state.`,
         );
-      } else if (clock.session !== "regular" && result.value.length) {
-        candidate.intraday.data_notes.push(
-          `Candles are from the ${result.sessionDate} regular session; the market session is currently ${clock.session}.`,
-        );
+      } else {
+        candidate.enrichment_status.intraday = { status: "available", detail: null };
+        if (clock.session !== "regular" && result.value.length) {
+          candidate.intraday.data_notes.push(
+            `Candles are from the ${result.sessionDate} regular session; the market session is currently ${clock.session}.`,
+          );
+        }
       }
     } else {
       const failure = capabilityFromError("intraday_aggregates", result.error);
       candidate.data_quality_notes.push(`Intraday aggregates unavailable: ${failure.reason}`);
       candidate.unavailable_fields.push("intraday");
+      candidate.enrichment_status.intraday = failure.plan_restricted
+        ? { status: "plan_restricted", detail: failure.reason }
+        : { status: "request_failed", detail: failure.reason };
       if (failure.plan_restricted && !intradayCapabilityDown) {
         intradayCapabilityDown = true;
         unavailableCapabilities.push(failure);
@@ -1196,10 +1364,14 @@ export async function enrichMarketScan(
     if (result.ok) {
       candidate.news = result.value;
       candidate.enrichment_stage = "news";
+      candidate.enrichment_status.news = { status: "available", detail: null };
     } else {
       const failure = capabilityFromError("ticker_news", result.error);
       candidate.data_quality_notes.push(`News unavailable: ${failure.reason}`);
       candidate.unavailable_fields.push("news");
+      candidate.enrichment_status.news = failure.plan_restricted
+        ? { status: "plan_restricted", detail: failure.reason }
+        : { status: "request_failed", detail: failure.reason };
       if (failure.plan_restricted && !newsCapabilityDown) {
         newsCapabilityDown = true;
         unavailableCapabilities.push(failure);
@@ -1213,10 +1385,13 @@ export async function enrichMarketScan(
   for (const candidate of optionsTargets) {
     const direction = candidate.intraday?.direction ?? "neutral";
     const underlyingPrice = candidate.live_snapshot?.current_price ??
+      candidate.live_quote?.current_price ??
       candidate.intraday?.last_candle_close ?? null;
     if (candidate.live_snapshot?.current_price == null && underlyingPrice != null) {
       candidate.data_quality_notes.push(
-        "Options strike band was centered on the last available 5-minute candle close because no live snapshot price was available.",
+        candidate.live_quote?.current_price != null
+          ? "Options strike band was centered on the Robinhood fallback quote price because Massive snapshots are unavailable."
+          : "Options strike band was centered on the last available 5-minute candle close because no live snapshot price was available.",
       );
     }
     if (direction === "neutral") {
@@ -1228,6 +1403,10 @@ export async function enrichMarketScan(
         contracts: [],
         data_notes: ["Neutral intraday direction — no directional contract type was selected."],
       };
+      candidate.enrichment_status.options = {
+        status: "not_requested",
+        detail: "Neutral intraday direction — no directional contract type was selected, so the chain was not requested.",
+      };
       continue;
     }
     if (underlyingPrice == null) {
@@ -1238,6 +1417,10 @@ export async function enrichMarketScan(
         rejection_reasons: {},
         contracts: [],
         data_notes: ["No live underlying price; the options chain was not requested."],
+      };
+      candidate.enrichment_status.options = {
+        status: "request_failed",
+        detail: "No live underlying price was available to center the strike band, so the chain was not requested.",
       };
       candidate.unavailable_fields.push("options");
       continue;
@@ -1258,8 +1441,12 @@ export async function enrichMarketScan(
     if (result.ok) {
       candidate.options = result.value;
       candidate.enrichment_stage = "options";
+      candidate.enrichment_status.options = { status: "available", detail: null };
     } else {
       const failure = capabilityFromError("options_chain_snapshot", result.error);
+      candidate.enrichment_status.options = failure.plan_restricted
+        ? { status: "plan_restricted", detail: failure.reason }
+        : { status: "request_failed", detail: failure.reason };
       candidate.options = {
         options_chain_available: false,
         contracts_reviewed: 0,
@@ -1289,7 +1476,10 @@ export async function enrichMarketScan(
   ];
 
   const liveTimestamps = enriched
-    .map((candidate) => candidate.live_snapshot?.data_timestamp)
+    .flatMap((candidate) => [
+      candidate.live_snapshot?.data_timestamp,
+      candidate.live_quote?.data_timestamp,
+    ])
     .filter((value): value is string => Boolean(value))
     .map((value) => Date.parse(value))
     .filter((value) => Number.isFinite(value));
@@ -1304,6 +1494,14 @@ export async function enrichMarketScan(
     live_data_as_of: liveTimestamps.length ? new Date(Math.max(...liveTimestamps)).toISOString() : null,
     market_session: clock.session,
     unavailable_capabilities: unavailableCapabilities,
+    stage_scope: {
+      snapshot_attempts: config.snapshotCandidates,
+      intraday_attempts: config.intradayCandidates,
+      news_attempts: config.newsCandidates,
+      options_attempts: config.optionsCandidates,
+      description: `Top ${config.snapshotCandidates} receive snapshot attempts, top ${config.intradayCandidates} receive intraday attempts, top ${config.newsCandidates} receive news, top ${config.optionsCandidates} receive options-chain attempts. Candidates outside a stage's cutoff were not requested at that stage.`,
+    },
+    quote_fallback_used: quoteFallbackUsed,
     candidates: orderedCandidates,
   };
 

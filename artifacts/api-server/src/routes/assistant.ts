@@ -411,6 +411,8 @@ router.post(
           market_session: enrichedScan.market_session,
           live_data_as_of: enrichedScan.live_data_as_of,
           unavailable_capabilities: enrichedScan.unavailable_capabilities,
+          stage_scope: enrichedScan.stage_scope,
+          quote_fallback_used: enrichedScan.quote_fallback_used,
           candidates: enrichedScan.candidates.slice(0, 5),
         }
       : null;
@@ -480,6 +482,8 @@ router.post(
       "When market_scan is present in the dashboard context, its candidates are exact server-generated objects. Analyze only the fields present. Never invent, estimate, or extrapolate live prices, VWAP, intraday levels, option premiums, spreads, open interest, implied volatility, Greeks, or news that is not in the supplied objects.",
       "All confidence scores, intraday setup scores, and option scores in market_scan are deterministic backend calculations. Do not recalculate, adjust, or re-score them; you may only compare and interpret them.",
       "If a market_scan candidate marks a field or capability as unavailable (for example options_chain_available=false or entries in unavailable_capabilities), state that limitation explicitly instead of filling the gap.",
+      "market_scan.stage_scope defines the pipeline's per-stage cutoffs. A candidate whose enrichment_status entry says not_requested was simply outside that stage's cutoff — that is expected pipeline design, not a data failure. Distinguish it clearly from plan_restricted (blocked by the data plan) and request_failed (a real error).",
+      "When a candidate has live_quote with source robinhood_quote_fallback, treat its price, bid, ask, and spread as a live Robinhood quote — never describe it as Massive snapshot data, and never infer volume, VWAP, candles, or intraday structure from it.",
       "Do not promise returns, guarantee outcomes, or claim certainty about future market direction.",
       "You cannot place, modify, approve, or cancel trades. Never imply that you performed an order action.",
       "Keep answers practical, structured, and concise.",

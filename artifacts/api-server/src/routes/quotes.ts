@@ -583,6 +583,8 @@ router.get("/market-scan", requireAuth, async (req, res) => {
         news_candidates_reviewed: enrichment.news_candidates_reviewed,
         options_candidates_reviewed: enrichment.options_candidates_reviewed,
         unavailable_capabilities: enrichment.unavailable_capabilities,
+        stage_scope: enrichment.stage_scope,
+        quote_fallback_used: enrichment.quote_fallback_used,
         option_score_method:
           "Deterministic backend score (0-100) combining option spread quality, open interest, option volume, delta suitability, time to expiration, strike distance from the confirmation level, break-even distance, intraday setup score, and the historical scanner score. The AI does not calculate or alter option scores.",
         returned_candidates: returned.length,
