@@ -30,11 +30,12 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir -p _site
-          cp index.html style.css script.js ui-polish.js dashboard-runtime-fixes.js ai-assistant.js ai-assistant-core.js _site/
-          cat performance-data.js resilient-data.js portfolio-intelligence.js minute-refresh.js >> _site/script.js
+          cp index.html style.css script.js _site/
+          cp ui-polish.js dashboard-runtime-fixes.js ai-assistant.js ai-assistant-core.js _site/
+          cat performance-data.js resilient-data.js portfolio-intelligence.js ai-assistant.js minute-refresh.js >> _site/script.js
           cp index.html _site/404.html
-          sed -i 's/script.js?v=11.1/script.js?v=12.1/g' _site/index.html _site/404.html
-          sed -i 's/ai-assistant.js?v=1.0/ai-assistant.js?v=2.1/g' _site/index.html _site/404.html
+          sed -i 's/script.js?v=11.1/script.js?v=12.2/g' _site/index.html _site/404.html
+          sed -i 's/ai-assistant.js?v=1.0/ai-assistant.js?v=2.2/g' _site/index.html _site/404.html
           python - <<'PY'
           from pathlib import Path
 
