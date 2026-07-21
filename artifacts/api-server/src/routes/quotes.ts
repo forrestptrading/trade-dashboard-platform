@@ -1,6 +1,11 @@
 import { Router, type IRouter } from "express";
 import { getBroker } from "../broker/index.js";
 import { logger } from "../lib/logger.js";
+import {
+  enrichMarketScan,
+  liveScanConfig,
+  type LiveEnrichmentResult,
+} from "../lib/marketScanLive.js";
 import { requireAuth } from "../middlewares/auth.js";
 
 const router: IRouter = Router();
@@ -542,25 +547,54 @@ router.get("/market-scan", requireAuth, async (req, res) => {
   const forceRefresh = req.query["refresh"] === "true";
 
   try {
+    // Stage 1 — unchanged historical full-market scan.
     const payload = await getMarketScan(forceRefresh);
+
+    // Stages 2–5 — live snapshot, intraday, news, and options enrichment.
+    // Live-stage failures are reported explicitly; they never silently
+    // degrade the response back to a historical-only shape.
+    const apiKey = process.env["MASSIVE_API_KEY"]?.trim() ?? "";
+    const config = liveScanConfig();
+    const enrichment: LiveEnrichmentResult = await enrichMarketScan(
+      payload.candidates,
+      payload.generated_at,
+      apiKey,
+      forceRefresh,
+    );
+
+    const returned = enrichment.candidates.slice(0, limit);
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
     res.json({
       success: true,
       source: "massive",
-      scan_mode: "market-wide-anchor-trend-v1",
+      scan_mode: enrichment.scan_mode,
       read_only: true,
       data: {
         ...payload,
-        returned_candidates: Math.min(limit, payload.candidates.length),
-        candidates: payload.candidates.slice(0, limit),
+        scan_mode: enrichment.scan_mode,
+        market_session: enrichment.market_session,
+        live_data_as_of: enrichment.live_data_as_of,
+        historical_universe_scanned: payload.universe_scanned,
+        historical_eligible_count: payload.eligible_after_filters,
+        historical_data_through: payload.data_through,
+        snapshot_candidates_reviewed: enrichment.snapshot_candidates_reviewed,
+        intraday_candidates_reviewed: enrichment.intraday_candidates_reviewed,
+        live_eligible_count: enrichment.live_eligible_count,
+        news_candidates_reviewed: enrichment.news_candidates_reviewed,
+        options_candidates_reviewed: enrichment.options_candidates_reviewed,
+        unavailable_capabilities: enrichment.unavailable_capabilities,
+        option_score_method:
+          "Deterministic backend score (0-100) combining option spread quality, open interest, option volume, delta suitability, time to expiration, strike distance from the confirmation level, break-even distance, intraday setup score, and the historical scanner score. The AI does not calculate or alter option scores.",
+        returned_candidates: returned.length,
+        candidates: returned,
       },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn({ err: message }, "[market-scan] historical market scan failed");
+    logger.warn({ err: message }, "[market-scan] market scan failed");
     res.status(502).json({
       success: false,
-      error: "Historical market scan is temporarily unavailable",
+      error: "Market scan is temporarily unavailable",
       detail: message.slice(0, 240),
     });
   }

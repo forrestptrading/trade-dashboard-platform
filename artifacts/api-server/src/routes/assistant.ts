@@ -7,6 +7,7 @@ import {
 } from "express";
 import { getBroker } from "../broker/index";
 import { logger } from "../lib/logger";
+import { getLastEnrichedScan } from "../lib/marketScanLive";
 import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -400,6 +401,21 @@ router.post(
     const generatedAt = new Date();
     const marketClock = getEasternClock(generatedAt);
 
+    // When the dashboard requests market-scan analysis, attach the exact
+    // server-generated enriched candidate objects (never client-supplied).
+    const includeMarketScan = body["include_market_scan"] === true;
+    const enrichedScan = includeMarketScan ? getLastEnrichedScan() : null;
+    const marketScanContext = enrichedScan
+      ? {
+          scan_mode: enrichedScan.scan_mode,
+          market_session: enrichedScan.market_session,
+          live_data_as_of: enrichedScan.live_data_as_of,
+          unavailable_capabilities: enrichedScan.unavailable_capabilities,
+          candidates: enrichedScan.candidates.slice(0, 5),
+        }
+      : null;
+    const marketScanUnavailable = includeMarketScan && !enrichedScan;
+
     let rawQuotes: NormalizedQuote[] = [];
     let quoteError: string | null = null;
     try {
@@ -424,15 +440,25 @@ router.post(
       quote_quality_summary: summarizeQuoteQuality(quotes),
       quotes,
       portfolio,
+      market_scan: marketScanContext,
+      market_scan_status: marketScanContext
+        ? "Server-generated enriched market-scan candidates are attached under market_scan."
+        : marketScanUnavailable
+          ? "Market-scan analysis was requested, but no enriched scan is cached on the server. Run the full-market scan first."
+          : "No market-scan context was requested.",
       unavailable_inputs: [
         "candlestick charts",
-        "intraday volume and relative volume",
-        "news and earnings catalysts",
         "economic calendar",
-        "market-wide scanner",
-        "options chains and premiums",
-        "implied volatility and option Greeks",
         "order flow and time-and-sales",
+        ...(marketScanContext
+          ? []
+          : [
+              "intraday volume and relative volume",
+              "news and earnings catalysts",
+              "market-wide scanner",
+              "options chains and premiums",
+              "implied volatility and option Greeks",
+            ]),
       ],
     };
 
@@ -451,6 +477,9 @@ router.post(
       "For each candidate include observed facts, bias or watch thesis, confirmation condition, invalidation condition, missing data, and confidence level. Do not provide exact entry, stop, or target prices from the current data alone.",
       "Respect portfolio constraints. Do not recommend share quantities whose cost exceeds reported buying power. Do not recommend short selling when margin and borrow availability are unknown. Do not recommend a specific option contract without a current option chain, premium, spread, expiration, implied volatility, and Greeks.",
       "For options already held, call out expiration risk, leverage, liquidity uncertainty, and maximum-loss uncertainty when cost basis is missing.",
+      "When market_scan is present in the dashboard context, its candidates are exact server-generated objects. Analyze only the fields present. Never invent, estimate, or extrapolate live prices, VWAP, intraday levels, option premiums, spreads, open interest, implied volatility, Greeks, or news that is not in the supplied objects.",
+      "All confidence scores, intraday setup scores, and option scores in market_scan are deterministic backend calculations. Do not recalculate, adjust, or re-score them; you may only compare and interpret them.",
+      "If a market_scan candidate marks a field or capability as unavailable (for example options_chain_available=false or entries in unavailable_capabilities), state that limitation explicitly instead of filling the gap.",
       "Do not promise returns, guarantee outcomes, or claim certainty about future market direction.",
       "You cannot place, modify, approve, or cancel trades. Never imply that you performed an order action.",
       "Keep answers practical, structured, and concise.",
