@@ -159,16 +159,28 @@ async function apiFetchJson(path, options = {}) {
   return result;
 }
 
+function activateDashboardSection(sectionId) {
+  document.querySelectorAll(".nav-btn[data-section]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.section === sectionId);
+  });
+  document.querySelectorAll(".page-section").forEach((section) => {
+    section.classList.toggle("active-section", section.id === sectionId);
+  });
+}
+
+globalThis.activateDashboardSection = activateDashboardSection;
+
+let navigationListenerInstalled = false;
+
 function setupNavigation() {
-  const buttons = document.querySelectorAll(".nav-btn");
-  const sections = document.querySelectorAll(".page-section");
-  buttons.forEach((button) => {
-    button.addEventListener("click", () => {
-      buttons.forEach((item) => item.classList.remove("active"));
-      sections.forEach((section) => section.classList.remove("active-section"));
-      button.classList.add("active");
-      document.getElementById(button.dataset.section)?.classList.add("active-section");
-    });
+  if (navigationListenerInstalled) return;
+  navigationListenerInstalled = true;
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".nav-btn[data-section]");
+    if (!button) return;
+    const sectionId = button.dataset.section;
+    if (!sectionId || !document.getElementById(sectionId)) return;
+    activateDashboardSection(sectionId);
   });
 }
 

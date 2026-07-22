@@ -20,7 +20,12 @@
   }
 
   function openAssistantSection() {
-    document.querySelectorAll(".nav-btn").forEach((button) => {
+    if (typeof globalThis.activateDashboardSection === "function") {
+      globalThis.activateDashboardSection("assistant");
+      return;
+    }
+    // Safe fallback using fresh DOM queries
+    document.querySelectorAll(".nav-btn[data-section]").forEach((button) => {
       button.classList.toggle("active", button.dataset.section === "assistant");
     });
     document.querySelectorAll(".page-section").forEach((section) => {
@@ -935,11 +940,15 @@
     contextList.appendChild(contextCard);
   }
 
+  // Section switching is handled by the shared delegated navigation in
+  // script.js (activateDashboardSection). This listener only adds the
+  // assistant-specific focus behavior and never calls preventDefault.
   document.addEventListener("click", (event) => {
-    const button = event.target.closest?.('[data-section="assistant"]');
+    const button = event.target.closest?.('.nav-btn[data-section="assistant"]');
     if (!button) return;
-    event.preventDefault();
-    openAssistantSection();
+    if (typeof globalThis.activateDashboardSection !== "function") {
+      openAssistantSection();
+    }
     document.getElementById("assistantInput")?.focus();
   });
 

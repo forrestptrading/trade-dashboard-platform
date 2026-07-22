@@ -139,6 +139,14 @@ body {
   display: none;
 }
 
+.page-section:not(.active-section) {
+  display: none !important;
+}
+
+.page-section.active-section {
+  display: block;
+}
+
 .active-section {
   display: block;
 }
