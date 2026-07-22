@@ -387,7 +387,8 @@
     actions.className = "market-scan-actions";
     const analyzeButton = document.createElement("button");
     analyzeButton.type = "button";
-    analyzeButton.textContent = "Ask AI to Analyze Top 5";
+    analyzeButton.dataset.role = "analyze-top5";
+    analyzeButton.textContent = analyzeButtonLabel();
     analyzeButton.disabled = !candidates.length;
     analyzeButton.addEventListener("click", () => analyzeTopCandidates(analyzeButton));
     actions.appendChild(analyzeButton);
@@ -434,6 +435,99 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return "n/a";
     return `$${number.toFixed(2)}`;
+  }
+
+  function analyzeButtonLabel() {
+    return lastProjection ? "Ask AI to Explain Scan + Projections" : "Ask AI to Analyze Top 5";
+  }
+
+  function projectionUnavailableText(reason) {
+    const detail = typeof reason === "string" && reason.trim() ? ` (${reason.trim()})` : "";
+    return `Unavailable${detail}`;
+  }
+
+  function formatProjectionChatSummary(result) {
+    const candidates = Array.isArray(result.candidates) ? result.candidates.slice() : [];
+    candidates.sort((a, b) => (Number(a.rank) || 0) - (Number(b.rank) || 0));
+    const anchorSourceLabels = {
+      robinhood_quote_fallback: "live Robinhood quote",
+      massive_snapshot: "Massive snapshot",
+      latest_completed_close: "latest completed close (not a live price)"
+    };
+    const horizonDefs = [
+      ["1 day", "one_day"],
+      ["5 days", "five_day"],
+      ["20 days", "twenty_day"]
+    ];
+
+    const blocks = candidates.map((candidate, index) => {
+      const rank = Number(candidate.rank) || index + 1;
+      const bias = String(candidate.direction_bias || "neutral").toUpperCase();
+      const confidence = Number(candidate.projection_confidence_score);
+      const confidenceText = Number.isFinite(confidence)
+        ? `${confidence}/100 (${String(candidate.projection_confidence_label || "low")})`
+        : "Unavailable";
+      const lines = [`${rank}. ${candidate.symbol} — ${bias}, confidence ${confidenceText}`];
+
+      if (candidate.projection_status !== "available") {
+        lines.push(`Projection ${projectionUnavailableText(candidate.unavailable_reason)}`);
+        return lines.join("\n");
+      }
+
+      const anchorPrice = Number(candidate.anchor_price);
+      lines.push(
+        Number.isFinite(anchorPrice)
+          ? `Anchor: ${projectionMoney(anchorPrice)} from ${anchorSourceLabels[candidate.anchor_price_source] || candidate.anchor_price_source || "unknown source"}`
+          : `Anchor: ${projectionUnavailableText(candidate.anchor_price_source === "unavailable" ? "no usable anchor price" : null)}`
+      );
+
+      const upRateParts = [];
+      horizonDefs.forEach(([label, key]) => {
+        const horizon = candidate.horizons?.[key];
+        if (horizon && horizon.status === "available") {
+          lines.push(`${label}: ${projectionMoney(horizon.bear_price)} / ${projectionMoney(horizon.base_price)} / ${projectionMoney(horizon.bull_price)} (bear/base/bull)`);
+          const upRate = Number(horizon.historical_up_rate);
+          const count = Number(horizon.analogue_count);
+          if (Number.isFinite(upRate)) {
+            upRateParts.push(`${label} ${(upRate * 100).toFixed(0)}%${Number.isFinite(count) ? ` across ${count} analogues` : ""}`);
+          }
+        } else {
+          lines.push(`${label}: ${projectionUnavailableText(horizon?.unavailable_reason)}`);
+        }
+      });
+      if (upRateParts.length) lines.push(`Analogue up-rate: ${upRateParts.join("; ")}`);
+
+      const news = candidate.news_analysis;
+      if (news) {
+        const score = Number(news.aggregate_news_score);
+        lines.push(
+          Number.isFinite(score)
+            ? `News: ${score > 0 ? "+" : ""}${score.toFixed(2)}, ${String(news.coverage_quality || "unavailable")} coverage`
+            : `News: ${projectionUnavailableText(null)}`
+        );
+      } else {
+        lines.push("News: Unavailable (no news analysis attached)");
+      }
+
+      const backtest = candidate.backtest && candidate.backtest.five_day;
+      if (backtest && backtest.status === "available") {
+        const accuracy = Number(backtest.directional_accuracy);
+        const medianError = Number(backtest.median_absolute_error_percent);
+        lines.push(`Backtest (5-day): ${Number.isFinite(accuracy) ? `${(accuracy * 100).toFixed(0)}% directional accuracy` : "accuracy unavailable"}; ${Number.isFinite(medianError) ? `median error ${medianError.toFixed(2)}pp` : "median error unavailable"} over ${Number(backtest.samples) || 0} samples`);
+      } else {
+        lines.push("Backtest (5-day): Unavailable (insufficient history)");
+      }
+
+      const driver = Array.isArray(candidate.drivers) && candidate.drivers.length ? candidate.drivers[0] : null;
+      const risk = Array.isArray(candidate.risks) && candidate.risks.length ? candidate.risks[0] : null;
+      if (driver) lines.push(`Driver: ${driver}`);
+      if (risk) lines.push(`Risk: ${risk}`);
+
+      return lines.join("\n");
+    });
+
+    if (!blocks.length) return "No projection candidates were returned.";
+    return `${blocks.join("\n\n")}\n\nScenario bands are 20th/50th/80th percentile historical-analogue outcomes plus a capped news adjustment — not guaranteed price targets.`;
   }
 
   function buildProjectionChart(projection) {
@@ -658,7 +752,7 @@
     lastProjection = result;
     const candidates = Array.isArray(result.candidates) ? result.candidates : [];
     candidates.forEach((projection) => {
-      const card = grid.querySelector(`[data-projection-symbol="${String(projection.symbol).toUpperCase()}"]`);
+      const card = grid ? grid.querySelector(`[data-projection-symbol="${String(projection.symbol).toUpperCase()}"]`) : null;
       if (!card) return;
       card.querySelectorAll(".projection-panel").forEach((existing) => existing.remove());
       card.appendChild(buildProjectionPanel(projection, result));
@@ -668,6 +762,14 @@
       "Trend-News Projection",
       `Projected ${candidates.length} candidates (${result.cached ? "cached result" : "fresh calculation"}). Market regime: ${String(regime.regime || "unavailable").replace(/_/g, "-")} (SPY 20-session ${regime.spy_twenty_session_return_percent !== null && regime.spy_twenty_session_return_percent !== undefined ? `${regime.spy_twenty_session_return_percent}%` : "n/a"}). Projections are historical-analogue scenario bands, not price predictions.`
     );
+    const summaryMessage = appendAssistantMessage("Trend-News Projection", formatProjectionChatSummary(result));
+    const summaryBody = summaryMessage?.querySelector("div");
+    if (summaryBody) summaryBody.style.whiteSpace = "pre-wrap";
+    document.querySelectorAll('button[data-role="analyze-top5"]').forEach((analyzeButton) => {
+      if (analyzeButton.textContent !== "AI Reviewing...") {
+        analyzeButton.textContent = analyzeButtonLabel();
+      }
+    });
   }
 
   async function runProjection(button, grid) {
@@ -712,15 +814,29 @@
 
     button.disabled = true;
     button.textContent = "AI Reviewing...";
-    const prompt = [
+    const hasProjection = Boolean(lastProjection);
+    const promptLines = [
       "Analyze the top five candidates from the server-generated full-market scan attached under market_scan in the dashboard context.",
       "Each candidate is a complete backend-enriched object: historical scan scores, live snapshot, intraday 5-minute technicals (VWAP, opening range, swing levels, momentum, confirmation/invalidation/targets), news, and — for the final two — a filtered options chain with deterministic backend option scores.",
       "All scores are deterministic backend calculations; do not recalculate or alter them.",
       "Use only the supplied fields. Never invent prices, levels, premiums, Greeks, or news. Explicitly call out anything marked unavailable.",
       "Compare the candidates, identify the strongest current setup or state that none is valid, and explain what data supports or is missing from that conclusion."
-    ].join("\n").slice(0, 1_950);
+    ];
+    if (hasProjection) {
+      promptLines.push(
+        "The server's cached trend-news projections are attached under market_projection. Compare and explain all five cached projections.",
+        "For each projected symbol list: bias, confidence, 1-day, 5-day, and 20-day bear/base/bull bands, historical analogue up-rate, news effect, backtest quality, and main risks.",
+        "Use the exact projection numbers supplied. Do not alter or recalculate them, and never call the bands guaranteed price targets."
+      );
+    }
+    const prompt = promptLines.join("\n").slice(0, 1_950);
 
-    appendAssistantMessage("You", "Analyze the top five enriched full-market scanner candidates.");
+    appendAssistantMessage(
+      "You",
+      hasProjection
+        ? "Analyze the top five enriched scanner candidates and explain their cached trend-news projections."
+        : "Analyze the top five enriched full-market scanner candidates."
+    );
     const pending = appendAssistantMessage("Assistant", "Reviewing the enriched scanner candidates (live snapshots, intraday levels, news, and option chains)...");
 
     try {
@@ -731,6 +847,7 @@
           symbols: candidates.map((candidate) => candidate.symbol).filter(Boolean),
           history: [],
           include_market_scan: true,
+          include_market_projection: hasProjection,
           portfolio: portfolioContext()
         })
       });
@@ -742,7 +859,7 @@
       appendAssistantMessage("Assistant", `Market-scan analysis unavailable: ${error.message}`);
     } finally {
       button.disabled = false;
-      button.textContent = "Ask AI to Analyze Top 5";
+      button.textContent = analyzeButtonLabel();
     }
   }
 
