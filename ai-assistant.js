@@ -909,6 +909,213 @@
     }
   }
 
+  // --------------------------------------------------------------------
+  // Project Any Ticker (V1) — direct-ticker projections for 1-5 symbols.
+  // --------------------------------------------------------------------
+  const TICKER_SYMBOL_PATTERN = /^[A-Z]{1,6}(?:[.-][A-Z0-9]{1,4})?$/;
+  const MAX_PROJECTION_SYMBOLS = 5;
+  let tickerProjectionBusy = false;
+  let lastTickerProjectionKey = null;
+
+  function parseTickerInput(raw) {
+    const tokens = String(raw || "").split(/[\s,;]+/).map((t) => t.trim().toUpperCase()).filter(Boolean);
+    const symbols = [];
+    for (const token of tokens) {
+      if (!TICKER_SYMBOL_PATTERN.test(token)) {
+        return { ok: false, symbols: [], error: `"${token.slice(0, 30)}" is not a valid ticker symbol.` };
+      }
+      if (!symbols.includes(token)) symbols.push(token);
+    }
+    if (!symbols.length) return { ok: false, symbols: [], error: "Enter one to five ticker symbols (for example: SSPC or SSPC, AAPL)." };
+    if (symbols.length > MAX_PROJECTION_SYMBOLS) {
+      return { ok: false, symbols: [], error: `A maximum of ${MAX_PROJECTION_SYMBOLS} tickers per request is supported (got ${symbols.length}).` };
+    }
+    return { ok: true, symbols, error: null };
+  }
+
+  // Mirrors the server's deterministic projection-intent detection
+  // (api-server src/lib/projectionIntent.ts) — keep the two in sync.
+  const PROJECTION_PHRASES = [
+    "project", "projection", "forecast", "price target", "price prediction", "predict",
+    "outlook", "next week", "next month", "next day", "tomorrow", "coming week",
+    "coming month", "coming days", "next few days", "next 5 days", "next five days",
+    "next 20 days", "where will", "where is it headed", "where it's headed", "where its headed",
+    "how high", "how low", "upside", "downside", "expected move", "scenario",
+    "bear case", "bull case", "base case"
+  ];
+  const UPPERCASE_STOPWORDS = new Set([
+    "A", "I", "AI", "AM", "AN", "AND", "ARE", "AS", "AT", "BE", "BUT", "BUY", "CAN", "CEO", "CFO",
+    "DO", "DOES", "EPS", "ETF", "ETFS", "FAQ", "FOR", "FROM", "GDP", "GO", "HAS", "HOW", "IF", "IN",
+    "IPO", "IRA", "IS", "IT", "ITS", "LLC", "LOW", "ME", "MY", "NEW", "NO", "NOT", "NOW", "OF", "OK",
+    "ON", "OR", "P/E", "PE", "PM", "SEC", "SELL", "SO", "THE", "TO", "UP", "US", "USA", "USD", "VS",
+    "WEEK", "WHAT", "WHEN", "WHO", "WHY", "WILL", "YOY", "YTD"
+  ]);
+
+  function detectProjectionIntent(message, knownSymbols) {
+    const text = String(message || "");
+    const lower = text.toLowerCase();
+    if (!PROJECTION_PHRASES.some((phrase) => lower.includes(phrase))) {
+      return { intent: false, symbols: [] };
+    }
+    const known = new Set((Array.isArray(knownSymbols) ? knownSymbols : [])
+      .map((s) => String(s || "").trim().toUpperCase())
+      .filter((s) => TICKER_SYMBOL_PATTERN.test(s)));
+    const symbols = [];
+    const add = (raw) => {
+      const symbol = String(raw).toUpperCase();
+      if (!TICKER_SYMBOL_PATTERN.test(symbol)) return;
+      if (!symbols.includes(symbol)) symbols.push(symbol);
+    };
+    for (const match of text.matchAll(/\$([A-Za-z]{1,6}(?:[.-][A-Za-z0-9]{1,4})?)\b/g)) add(match[1]);
+    for (const match of text.matchAll(/\b([A-Z]{1,6}(?:[.-][A-Z0-9]{1,4})?)\b/g)) {
+      const token = match[1];
+      if (UPPERCASE_STOPWORDS.has(token)) continue;
+      if (token.length === 1 && !known.has(token)) continue;
+      add(token);
+    }
+    if (known.size) {
+      for (const match of text.matchAll(/\b([A-Za-z]{1,6}(?:[.-][A-Za-z0-9]{1,4})?)\b/g)) {
+        const token = match[1].toUpperCase();
+        if (known.has(token)) add(token);
+      }
+    }
+    const limited = symbols.slice(0, MAX_PROJECTION_SYMBOLS);
+    return { intent: limited.length > 0, symbols: limited };
+  }
+
+  function renderTickerProjectionResult(result) {
+    const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+    const key = `${result.generated_at || ""}|${candidates.map((c) => c.symbol).join(",")}`;
+    if (key === lastTickerProjectionKey && result.cached) {
+      appendAssistantMessage(
+        "Ticker Projection",
+        `Same cached projection for ${candidates.map((c) => c.symbol).join(", ")} (generated ${result.generated_at ? new Date(result.generated_at).toLocaleTimeString() : "earlier"}) — see the cards above. The server recomputes every 15 minutes.`
+      );
+      return;
+    }
+    lastTickerProjectionKey = key;
+
+    const regime = result.market_regime || {};
+    appendAssistantMessage(
+      "Ticker Projection",
+      `Projected ${candidates.length} requested ticker${candidates.length === 1 ? "" : "s"} (${result.cached ? "cached result" : "fresh calculation"}; order shown is your request order, not a market ranking). Market regime: ${String(regime.regime || "unavailable").replace(/_/g, "-")}. Projections are historical-analogue scenario bands, not price predictions.`
+    );
+
+    const message = appendAssistantMessage("Ticker Projection", "");
+    const body = message?.querySelector("div");
+    if (body) {
+      body.textContent = "";
+      candidates.forEach((projection) => {
+        const card = document.createElement("div");
+        card.className = "scan-card";
+        card.style.marginBottom = "10px";
+        const header = document.createElement("header");
+        const title = document.createElement("strong");
+        title.textContent = `${projection.symbol} — requested #${projection.rank}`;
+        header.appendChild(title);
+        card.appendChild(header);
+        card.appendChild(buildProjectionPanel(projection, result));
+        body.appendChild(card);
+      });
+    }
+    const summaryMessage = appendAssistantMessage("Ticker Projection", formatProjectionChatSummary(result));
+    const summaryBody = summaryMessage?.querySelector("div");
+    if (summaryBody) summaryBody.style.whiteSpace = "pre-wrap";
+  }
+
+  async function runTickerProjection(button, input) {
+    if (tickerProjectionBusy) return;
+    openAssistantSection();
+    if (!isSignedIn()) {
+      appendAssistantMessage("Ticker Projection", "Sign in to project tickers (owner-only).");
+      return;
+    }
+    const parsed = parseTickerInput(input?.value);
+    if (!parsed.ok) {
+      appendAssistantMessage("Ticker Projection", parsed.error);
+      return;
+    }
+    tickerProjectionBusy = true;
+    button.disabled = true;
+    button.textContent = "Projecting...";
+    const pending = appendAssistantMessage(
+      "Ticker Projection",
+      `Building historical-analogue scenario bands for ${parsed.symbols.join(", ")} (server-side quotes, daily history, SPY/QQQ/IWM regime, news, walk-forward backtest)...`
+    );
+    try {
+      const result = await apiFetchJson("/api/ticker-projection", {
+        method: "POST",
+        body: JSON.stringify({ symbols: parsed.symbols })
+      });
+      pending?.remove();
+      if (!result?.data || !Array.isArray(result.data.candidates)) {
+        throw new Error("The API returned an invalid ticker-projection response");
+      }
+      renderTickerProjectionResult(result.data);
+    } catch (error) {
+      pending?.remove();
+      appendAssistantMessage("Ticker Projection", `Ticker projection unavailable: ${error.message}`);
+    } finally {
+      tickerProjectionBusy = false;
+      button.disabled = false;
+      button.textContent = "Project Ticker(s)";
+    }
+  }
+
+  function installTickerProjection(quickActions) {
+    if (document.getElementById("tickerProjectionInput")) return;
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexWrap = "wrap";
+    wrap.style.gap = "8px";
+    wrap.style.alignItems = "center";
+    wrap.style.width = "100%";
+
+    const label = document.createElement("strong");
+    label.textContent = "Project Any Ticker";
+    label.style.fontSize = "12px";
+    label.style.textTransform = "uppercase";
+    label.style.opacity = ".7";
+    label.style.width = "100%";
+
+    const input = document.createElement("input");
+    input.id = "tickerProjectionInput";
+    input.type = "text";
+    input.maxLength = 60;
+    input.placeholder = "SSPC or SSPC, AAPL (up to 5)";
+    input.setAttribute("aria-label", "Ticker symbols to project (up to five, comma separated)");
+    input.style.flex = "1 1 180px";
+    input.style.border = "1px solid var(--border)";
+    input.style.borderRadius = "10px";
+    input.style.padding = "9px 12px";
+    input.style.font = "inherit";
+
+    const button = document.createElement("button");
+    button.id = "projectTickerBtn";
+    button.type = "button";
+    button.textContent = "Project Ticker(s)";
+    button.addEventListener("click", () => runTickerProjection(button, input));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runTickerProjection(button, input);
+      }
+    });
+
+    wrap.append(label, input, button);
+    quickActions.appendChild(wrap);
+  }
+
+  // Shared hooks so the chat flow (ai-assistant-core.js) can reuse the same
+  // deterministic detection and card rendering.
+  globalThis.__anyTickerProjection = {
+    detectProjectionIntent,
+    renderTickerProjectionResult,
+    resetRenderState() {
+      lastTickerProjectionKey = null;
+    }
+  };
+
   function installMarketScanner() {
     const quickActions = document.querySelector(".assistant-quick-actions");
     const contextList = document.querySelector(".assistant-context-list");
@@ -927,6 +1134,8 @@
     button.textContent = "Scan Full Market";
     button.addEventListener("click", () => runMarketScan(button));
     quickActions.prepend(button);
+
+    installTickerProjection(quickActions);
 
     const contextCard = document.createElement("div");
     contextCard.className = "assistant-context-item";
@@ -954,6 +1163,6 @@
 
   loadScript("dashboardRuntimeFixesLoader", "dashboard-runtime-fixes.js?v=1.0");
   loadScript("dashboardPolishLoader", "ui-polish.js?v=2.1");
-  loadScript("assistantCoreLoader", "ai-assistant-core.js?v=1.1");
+  loadScript("assistantCoreLoader", "ai-assistant-core.js?v=1.2");
   installMarketScanner();
 })();

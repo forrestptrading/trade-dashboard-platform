@@ -281,7 +281,7 @@ async function fetchStockSnapshot(symbol: string, apiKey: string): Promise<LiveS
  * Robinhood quote provider. Used only when Massive stock snapshots are
  * plan-restricted; provenance is explicitly labeled on every object.
  */
-async function fetchQuoteFallbacks(symbols: string[]): Promise<Map<string, QuoteFallback>> {
+export async function fetchQuoteFallbacks(symbols: string[]): Promise<Map<string, QuoteFallback>> {
   const map = new Map<string, QuoteFallback>();
   if (!symbols.length) return map;
   const broker = getBroker("robinhood");

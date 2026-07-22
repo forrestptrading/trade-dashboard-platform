@@ -7,8 +7,14 @@ import {
 } from "express";
 import { getBroker } from "../broker/index";
 import { logger } from "../lib/logger";
-import { getLastEnrichedScan } from "../lib/marketScanLive";
-import { getLastProjection } from "../lib/marketProjection";
+import { fetchQuoteFallbacks, getLastEnrichedScan, type QuoteFallback } from "../lib/marketScanLive";
+import {
+  computeTickerProjection,
+  getLastProjection,
+  type ProjectionSubject,
+  type TickerProjectionResult,
+} from "../lib/marketProjection";
+import { sanitizeRequestedTickerSymbols } from "../lib/projectionIntent";
 import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -434,6 +440,74 @@ router.post(
       logger.warn({ err: quoteError }, "[assistant] live quote context unavailable");
     }
 
+    // Direct-ticker projection: compute server-side for the requested symbols.
+    // All prices and news are fetched by the server; client numbers are ignored.
+    const includeTickerProjection = body["include_ticker_projection"] === true;
+    let tickerProjection: TickerProjectionResult | null = null;
+    let tickerProjectionStatus = "No ticker projection was requested.";
+    if (includeTickerProjection) {
+      const massiveKey = process.env["MASSIVE_API_KEY"]?.trim() ?? "";
+      const validation = sanitizeRequestedTickerSymbols(body["projection_symbols"]);
+      if (!massiveKey) {
+        tickerProjectionStatus =
+          "Ticker projection was requested, but MASSIVE_API_KEY is not configured on the server.";
+      } else if (!validation.ok) {
+        tickerProjectionStatus = `Ticker projection was requested, but the symbols were invalid: ${validation.error}`;
+      } else {
+        // Reuse the already-fetched chat context quotes for overlapping
+        // symbols; only fetch fallback quotes for symbols not covered.
+        const fallbackQuotes = new Map<string, QuoteFallback>();
+        for (const quote of rawQuotes) {
+          if (!validation.symbols.includes(quote.symbol)) continue;
+          const hasBidAsk = quote.bidPrice !== null && quote.askPrice !== null;
+          const spreadAmount = hasBidAsk ? quote.askPrice! - quote.bidPrice! : null;
+          fallbackQuotes.set(quote.symbol, {
+            source: "robinhood_quote_fallback",
+            current_price: quote.price,
+            previous_close: quote.previousClose,
+            todays_change: quote.change,
+            todays_change_percent: quote.changePercent,
+            bid: quote.bidPrice,
+            ask: quote.askPrice,
+            spread_amount: spreadAmount,
+            spread_percent:
+              spreadAmount !== null && quote.price > 0
+                ? (spreadAmount / quote.price) * 100
+                : null,
+            data_timestamp: quote.timestamp,
+            volume: null,
+            delayed: false,
+            trading_halted: false,
+          });
+        }
+        const missingSymbols = validation.symbols.filter((symbol) => !fallbackQuotes.has(symbol));
+        if (missingSymbols.length) {
+          try {
+            const fetched = await fetchQuoteFallbacks(missingSymbols);
+            for (const [symbol, quote] of fetched) fallbackQuotes.set(symbol, quote);
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            logger.warn({ err: detail }, "[assistant] ticker-projection quote fetch failed");
+          }
+        }
+        const subjects: ProjectionSubject[] = validation.symbols.map((symbol) => ({
+          symbol,
+          live_quote: fallbackQuotes.get(symbol) ?? null,
+          live_snapshot: null,
+        }));
+        try {
+          tickerProjection = await computeTickerProjection(subjects, massiveKey, false);
+          tickerProjectionStatus = tickerProjection.cached
+            ? "Server-generated direct-ticker projections (served from the 15-minute cache) are attached under ticker_projection."
+            : "Freshly computed server-generated direct-ticker projections are attached under ticker_projection.";
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          logger.warn({ err: detail }, "[assistant] ticker projection failed");
+          tickerProjectionStatus = `Ticker projection was requested but failed: ${detail.slice(0, 200)}`;
+        }
+      }
+    }
+
     const quotes = rawQuotes.map((quote) => analyzeQuote(quote, generatedAt, marketClock.session));
     const dashboardContext = {
       generated_at: generatedAt.toISOString(),
@@ -461,6 +535,8 @@ router.post(
         : projectionUnavailable
           ? "Projection context was requested, but no projection is cached on the server. Press Project Top 5 first."
           : "No projection context was requested.",
+      ticker_projection: tickerProjection,
+      ticker_projection_status: tickerProjectionStatus,
       unavailable_inputs: [
         "candlestick charts",
         "economic calendar",
@@ -500,6 +576,9 @@ router.post(
       "When market_projection is present, every number in it is a deterministic backend calculation from historical analogues plus a bounded news adjustment. Do not alter, recalculate, or re-derive any projection number, and never describe the scenario bands as guaranteed predictions or price targets.",
       "In market_projection, historical_up_rate is the share of selected historical analogues that finished higher — it is NOT a probability of profit and must never be presented as one.",
       "If a projection candidate or horizon is marked unavailable, or news_analysis shows trend_and_market_only=true (no supplied sentiment), state that explicitly. Never fill projection gaps, and never derive entries, stops, VWAP levels, option strikes, premiums, current volume, or trade sizes from a projection — it is research and scenario planning only.",
+      "When ticker_projection is present, it contains server-computed direct-ticker projections in trend-news-analogue-ticker-v1 mode. Rank in ticker_projection reflects the order the tickers were requested in — it is NOT a market ranking, scanner score, or quality ordering. Every number is a deterministic backend calculation; do not alter, recalculate, or re-derive projection numbers, and never describe the bands as guaranteed price targets.",
+      "When the user asks about 'next week' or the coming week, focus on the five_day horizon of the attached projections; use one_day for tomorrow and twenty_day for roughly the next month. Always state the bear/base/bull scenario bands and the confidence label rather than a single point prediction.",
+      "If ticker_projection_status reports a failure or invalid symbols, tell the user exactly that status instead of estimating a projection yourself. Never invent projection numbers for symbols that are not in ticker_projection.",
       "Do not promise returns, guarantee outcomes, or claim certainty about future market direction.",
       "You cannot place, modify, approve, or cancel trades. Never imply that you performed an order action.",
       "Keep answers practical, structured, and concise.",
@@ -577,6 +656,8 @@ router.post(
           generated_at: dashboardContext.generated_at,
           market_session: marketClock.session,
           quote_quality_summary: dashboardContext.quote_quality_summary,
+          ticker_projection: tickerProjection,
+          ticker_projection_status: includeTickerProjection ? tickerProjectionStatus : null,
           read_only: true,
           accuracy_mode: "trade-readiness-v2",
         },

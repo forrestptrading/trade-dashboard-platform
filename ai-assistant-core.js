@@ -369,20 +369,52 @@
     assistantBusy = true;
     setAssistantControls();
 
+    // Deterministic projection-intent detection (shared with ai-assistant.js).
+    // When the message asks for a forward-looking ticker projection, the
+    // server computes and attaches exact projections instead of letting the
+    // AI guess numbers.
+    const projectionHooks = globalThis.__anyTickerProjection || null;
+    const portfolioContextData = buildPortfolioContext();
+    let projectionIntent = { intent: false, symbols: [] };
+    if (projectionHooks && typeof projectionHooks.detectProjectionIntent === "function") {
+      const knownSymbols = [
+        ...watchlist,
+        ...portfolioContextData.holdings.map((holding) => holding.symbol),
+      ];
+      projectionIntent = projectionHooks.detectProjectionIntent(cleanMessage, knownSymbols);
+    }
+
     try {
+      const requestBody = {
+        message: cleanMessage,
+        symbols: watchlist.slice(0, 12),
+        history: priorHistory,
+        portfolio: portfolioContextData,
+      };
+      if (projectionIntent.intent) {
+        requestBody.include_ticker_projection = true;
+        requestBody.projection_symbols = projectionIntent.symbols;
+      }
       const result = await apiFetchJson("/api/assistant/chat", {
         method: "POST",
-        body: JSON.stringify({
-          message: cleanMessage,
-          symbols: watchlist.slice(0, 12),
-          history: priorHistory,
-          portfolio: buildPortfolioContext(),
-        }),
+        body: JSON.stringify(requestBody),
       });
       const answer = String(result.data?.answer || "").trim();
       if (!answer) throw new Error("The assistant returned an empty answer");
 
       pending?.remove();
+      const tickerProjection = result.data?.ticker_projection;
+      if (
+        tickerProjection &&
+        Array.isArray(tickerProjection.candidates) &&
+        projectionHooks &&
+        typeof projectionHooks.renderTickerProjectionResult === "function"
+      ) {
+        // Deterministic server-computed cards first, then the AI's explanation.
+        projectionHooks.renderTickerProjectionResult(tickerProjection);
+      } else if (projectionIntent.intent && result.data?.ticker_projection_status) {
+        appendMessage("assistant", String(result.data.ticker_projection_status));
+      }
       appendMessage("assistant", answer);
       conversation.push(
         { role: "user", content: cleanMessage },
@@ -425,6 +457,9 @@
       conversation = [];
       const list = document.getElementById(MESSAGE_LIST_ID);
       if (list) list.innerHTML = "";
+      // The cleared DOM no longer shows projection cards, so reset the
+      // "already rendered" dedupe state to force full re-rendering.
+      globalThis.__anyTickerProjection?.resetRenderState?.();
       renderWelcome();
     });
 

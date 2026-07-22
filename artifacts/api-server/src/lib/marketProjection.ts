@@ -15,9 +15,10 @@ import {
   MassiveRequestError,
   easternClock,
   liveScanConfig,
-  type EnrichedCandidate,
   type LiveEnrichmentResult,
+  type LiveSnapshot,
   type MarketSession,
+  type QuoteFallback,
 } from "./marketScanLive.js";
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,32 @@ export interface CandidateProjection {
 
 export interface ProjectionResult {
   projection_mode: "trend-news-analogue-v1";
+  generated_at: string;
+  historical_data_through: string | null;
+  market_session: MarketSession;
+  market_regime: MarketRegime;
+  cache_seconds: number;
+  cached: boolean;
+  method_notes: string[];
+  candidates: CandidateProjection[];
+}
+
+/**
+ * Minimal server-generated subject for a directly requested ticker.
+ * Contains only the fields the projection engine genuinely needs; no fake
+ * scanner rankings, enrichment fields, or confidence-meter values.
+ */
+export interface ProjectionSubject {
+  symbol: string;
+  live_quote: QuoteFallback | null;
+  live_snapshot?: LiveSnapshot | null;
+}
+
+export interface TickerProjectionResult {
+  projection_mode: "trend-news-analogue-ticker-v1";
+  request_mode: "direct_ticker";
+  requested_symbols: string[];
+  rank_meaning: "request_order";
   generated_at: string;
   historical_data_through: string | null;
   market_session: MarketSession;
@@ -919,7 +946,7 @@ export function characterizeRegime(benchmarks: BenchmarkSeries): MarketRegime {
 // ---------------------------------------------------------------------------
 
 export function resolveAnchorPrice(
-  candidate: EnrichedCandidate,
+  subject: ProjectionSubject,
   latestClose: number | null,
   now: Date,
   session: MarketSession,
@@ -931,7 +958,7 @@ export function resolveAnchorPrice(
   notes: string[];
 } {
   const notes: string[] = [];
-  const quote = candidate.live_quote;
+  const quote = subject.live_quote;
   if (quote && quote.current_price !== null && quote.current_price > 0) {
     const ts = quote.data_timestamp ? Date.parse(quote.data_timestamp) : NaN;
     const ageMinutes = Number.isFinite(ts) ? (now.getTime() - ts) / 60_000 : null;
@@ -959,12 +986,12 @@ export function resolveAnchorPrice(
       notes,
     };
   }
-  const snapshotPrice = candidate.live_snapshot?.current_price ?? null;
+  const snapshotPrice = subject.live_snapshot?.current_price ?? null;
   if (snapshotPrice !== null && snapshotPrice > 0) {
     return {
       price: snapshotPrice,
       source: "massive_snapshot",
-      timestamp: candidate.live_snapshot?.data_timestamp ?? null,
+      timestamp: subject.live_snapshot?.data_timestamp ?? null,
       freshness: "stale",
       notes,
     };
@@ -998,6 +1025,20 @@ let projectionCache: ProjectionCache | null = null;
 const activeProjections = new Map<string, Promise<ProjectionResult>>();
 let lastProjectionResult: ProjectionResult | null = null;
 
+interface TickerProjectionCacheEntry {
+  expiresAt: number;
+  result: TickerProjectionResult;
+}
+// Separate direct-ticker cache: never overwrites or reads the top-five cache.
+const tickerProjectionCache = new Map<string, TickerProjectionCacheEntry>();
+const activeTickerProjections = new Map<string, Promise<TickerProjectionResult>>();
+let lastTickerProjectionResult: TickerProjectionResult | null = null;
+
+/** Latest completed direct-ticker projection for server-side consumers. */
+export function getLastTickerProjection(): TickerProjectionResult | null {
+  return lastTickerProjectionResult;
+}
+
 /** Latest completed projection for server-side consumers (AI assistant context). */
 export function getLastProjection(): ProjectionResult | null {
   return lastProjectionResult;
@@ -1009,6 +1050,9 @@ export function resetProjectionCaches(): void {
   projectionCache = null;
   activeProjections.clear();
   lastProjectionResult = null;
+  tickerProjectionCache.clear();
+  activeTickerProjections.clear();
+  lastTickerProjectionResult = null;
 }
 
 async function getBenchmarks(apiKey: string, now: Date, forceRefresh: boolean): Promise<BenchmarkSeries> {
@@ -1129,7 +1173,7 @@ export function directionBias(
 }
 
 async function projectCandidate(
-  candidate: EnrichedCandidate,
+  subject: ProjectionSubject,
   rank: number,
   benchmarks: BenchmarkSeries,
   apiKey: string,
@@ -1138,7 +1182,7 @@ async function projectCandidate(
   config: ReturnType<typeof liveScanConfig>,
 ): Promise<CandidateProjection> {
   const notes: string[] = [];
-  const symbol = candidate.symbol;
+  const symbol = subject.symbol;
 
   // 1) Candidate daily history.
   let bars: DailyBar[];
@@ -1200,7 +1244,7 @@ async function projectCandidate(
   const anyCatalyst = hasCurrentCatalyst(newsAnalysis);
 
   // 4) Anchor price.
-  const anchor = resolveAnchorPrice(candidate, latestClose, now, session);
+  const anchor = resolveAnchorPrice(subject, latestClose, now, session);
   notes.push(...anchor.notes);
   if (session === "closed" && anchor.source === "latest_completed_close") {
     notes.push("Market is closed; the anchor is the latest completed close, not a live regular-session price.");
@@ -1379,5 +1423,88 @@ export async function computeMarketProjection(
     if (activeProjections.get(inflightKey) === work) activeProjections.delete(inflightKey);
   });
   activeProjections.set(inflightKey, work);
+  return work;
+}
+
+/**
+ * Compute (or serve from a separate 15-minute cache) projections for 1-5
+ * directly requested tickers. Rank reflects the request order, not any market
+ * ranking. Uses the same engine, benchmarks, and honesty rules as the
+ * scanner projection but never reads or writes the top-five cache.
+ */
+export async function computeTickerProjection(
+  subjects: ProjectionSubject[],
+  apiKey: string,
+  forceRefresh: boolean,
+  now: Date = new Date(),
+): Promise<TickerProjectionResult> {
+  const limited = subjects.slice(0, 5);
+  const requestedSymbols = limited.map((s) => s.symbol);
+  const cacheKey = [...requestedSymbols].sort().join(",");
+  const cachedEntry = tickerProjectionCache.get(cacheKey);
+  if (!forceRefresh && cachedEntry && cachedEntry.expiresAt > now.getTime()) {
+    // The cache is keyed by normalized symbol set; remap the stored result so
+    // requested_symbols, candidate order, and rank always reflect THIS
+    // request's order.
+    const bySymbol = new Map(cachedEntry.result.candidates.map((c) => [c.symbol, c]));
+    const candidates = requestedSymbols
+      .map((symbol, i) => {
+        const cached = bySymbol.get(symbol);
+        return cached ? { ...cached, rank: i + 1 } : null;
+      })
+      .filter((c): c is CandidateProjection => c !== null);
+    return {
+      ...cachedEntry.result,
+      requested_symbols: requestedSymbols,
+      candidates,
+      cached: true,
+    };
+  }
+  const inflightKey = `${cacheKey}|force=${forceRefresh}`;
+  const existing = activeTickerProjections.get(inflightKey);
+  if (!forceRefresh && existing) return existing;
+
+  const work = (async () => {
+    const clock = easternClock(now);
+    const config = liveScanConfig();
+    const benchmarks = await getBenchmarks(apiKey, now, forceRefresh);
+    const regime = characterizeRegime(benchmarks);
+    const candidates = await mapWithConcurrency(
+      limited.map((subject, i) => ({ subject, rank: i + 1 })),
+      CANDIDATE_FETCH_CONCURRENCY,
+      ({ subject, rank }) =>
+        projectCandidate(subject, rank, benchmarks, apiKey, now, clock.session, config),
+    );
+    const result: TickerProjectionResult = {
+      projection_mode: "trend-news-analogue-ticker-v1",
+      request_mode: "direct_ticker",
+      requested_symbols: requestedSymbols,
+      rank_meaning: "request_order",
+      generated_at: now.toISOString(),
+      historical_data_through: benchmarks.spy.at(-1)?.date ?? null,
+      market_session: clock.session,
+      market_regime: regime,
+      cache_seconds: PROJECTION_CACHE_SECONDS,
+      cached: false,
+      method_notes: [
+        "Direct-ticker request: rank reflects the order the tickers were requested in, not a market-wide ranking.",
+        "Scenario bands are the 20th percentile (bear), median (base), and 80th percentile (bull) of forward returns across 30-60 spaced historical analogues selected by normalized feature distance.",
+        "historical_up_rate is the share of selected historical analogues that finished higher — it is not a probability of profit.",
+        `News applies a bounded, deterministic adjustment capped at ±${NEWS_ADJUSTMENT_CAP_PP.one_day}pp (1d), ±${NEWS_ADJUSTMENT_CAP_PP.five_day}pp (5d), ±${NEWS_ADJUSTMENT_CAP_PP.twenty_day}pp (20d); it is exactly zero when no article supplied sentiment.`,
+        DIRECTION_RULE,
+        "Projections are scenario estimates for research, not guaranteed price targets, entries, stops, or option guidance.",
+      ],
+      candidates,
+    };
+    tickerProjectionCache.set(cacheKey, {
+      expiresAt: now.getTime() + PROJECTION_CACHE_SECONDS * 1_000,
+      result,
+    });
+    lastTickerProjectionResult = result;
+    return result;
+  })().finally(() => {
+    if (activeTickerProjections.get(inflightKey) === work) activeTickerProjections.delete(inflightKey);
+  });
+  activeTickerProjections.set(inflightKey, work);
   return work;
 }
