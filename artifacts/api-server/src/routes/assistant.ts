@@ -8,6 +8,7 @@ import {
 import { getBroker } from "../broker/index";
 import { logger } from "../lib/logger";
 import { getLastEnrichedScan } from "../lib/marketScanLive";
+import { getLastProjection } from "../lib/marketProjection";
 import { requireAuth } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -418,6 +419,12 @@ router.post(
       : null;
     const marketScanUnavailable = includeMarketScan && !enrichedScan;
 
+    // When requested, attach the exact server-generated projection result
+    // (never client-supplied numbers).
+    const includeProjection = body["include_market_projection"] === true;
+    const projection = includeProjection ? getLastProjection() : null;
+    const projectionUnavailable = includeProjection && !projection;
+
     let rawQuotes: NormalizedQuote[] = [];
     let quoteError: string | null = null;
     try {
@@ -448,6 +455,12 @@ router.post(
         : marketScanUnavailable
           ? "Market-scan analysis was requested, but no enriched scan is cached on the server. Run the full-market scan first."
           : "No market-scan context was requested.",
+      market_projection: projection,
+      market_projection_status: projection
+        ? "Server-generated trend-news analogue projections are attached under market_projection."
+        : projectionUnavailable
+          ? "Projection context was requested, but no projection is cached on the server. Press Project Top 5 first."
+          : "No projection context was requested.",
       unavailable_inputs: [
         "candlestick charts",
         "economic calendar",
@@ -484,6 +497,9 @@ router.post(
       "If a market_scan candidate marks a field or capability as unavailable (for example options_chain_available=false or entries in unavailable_capabilities), state that limitation explicitly instead of filling the gap.",
       "market_scan.stage_scope defines the pipeline's per-stage cutoffs. A candidate whose enrichment_status entry says not_requested was simply outside that stage's cutoff — that is expected pipeline design, not a data failure. Distinguish it clearly from plan_restricted (blocked by the data plan), request_failed (a real error), and skipped (in scope for the stage, but deterministically skipped — for example a neutral intraday direction means no directional options contract is selected).",
       "When a candidate has live_quote with source robinhood_quote_fallback, treat its price, bid, ask, and spread as a live Robinhood quote — never describe it as Massive snapshot data, and never infer volume, VWAP, candles, or intraday structure from it.",
+      "When market_projection is present, every number in it is a deterministic backend calculation from historical analogues plus a bounded news adjustment. Do not alter, recalculate, or re-derive any projection number, and never describe the scenario bands as guaranteed predictions or price targets.",
+      "In market_projection, historical_up_rate is the share of selected historical analogues that finished higher — it is NOT a probability of profit and must never be presented as one.",
+      "If a projection candidate or horizon is marked unavailable, or news_analysis shows trend_and_market_only=true (no supplied sentiment), state that explicitly. Never fill projection gaps, and never derive entries, stops, VWAP levels, option strikes, premiums, current volume, or trade sizes from a projection — it is research and scenario planning only.",
       "Do not promise returns, guarantee outcomes, or claim certainty about future market direction.",
       "You cannot place, modify, approve, or cancel trades. Never imply that you performed an order action.",
       "Keep answers practical, structured, and concise.",

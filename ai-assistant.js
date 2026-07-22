@@ -5,6 +5,8 @@
 
   let lastMarketScan = null;
   let marketScanBusy = false;
+  let projectionBusy = false;
+  let lastProjection = null;
   let scannerInstallAttempts = 0;
 
   function loadScript(id, src) {
@@ -100,6 +102,17 @@
       .market-scan-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
       .market-scan-actions button { border: none; border-radius: 10px; padding: 10px 14px; cursor: pointer; font-weight: 800; }
       .market-scan-actions button:disabled { cursor: not-allowed; opacity: .55; }
+      .projection-panel { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: rgba(255,255,255,.03); font-size: 12.5px; display: grid; gap: 8px; }
+      .projection-headline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; }
+      .projection-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; background: rgba(255,255,255,.12); }
+      .projection-badge.bullish { background: rgba(70,160,90,.3); }
+      .projection-badge.bearish { background: rgba(190,70,80,.3); }
+      .projection-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .projection-table th, .projection-table td { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--border); }
+      .projection-table th:first-child, .projection-table td:first-child { text-align: left; }
+      .projection-chart { width: 100%; height: auto; display: block; }
+      .projection-note { font-size: 11px; opacity: .72; }
+      .projection-list { margin: 0; padding-left: 16px; font-size: 12px; display: grid; gap: 2px; }
     `;
     document.head.appendChild(style);
   }
@@ -362,6 +375,7 @@
       card.append(header, meter, stats);
       const liveSection = buildLiveSection(candidate);
       if (liveSection) card.appendChild(liveSection);
+      if (candidate.symbol) card.dataset.projectionSymbol = String(candidate.symbol).toUpperCase();
       grid.appendChild(card);
     });
 
@@ -377,6 +391,13 @@
     analyzeButton.disabled = !candidates.length;
     analyzeButton.addEventListener("click", () => analyzeTopCandidates(analyzeButton));
     actions.appendChild(analyzeButton);
+
+    const projectButton = document.createElement("button");
+    projectButton.type = "button";
+    projectButton.textContent = "Project Top 5";
+    projectButton.disabled = !candidates.length;
+    projectButton.addEventListener("click", () => runProjection(projectButton, grid));
+    actions.appendChild(projectButton);
 
     article.append(label, summary, grid, warning, actions);
     list.appendChild(article);
@@ -407,6 +428,276 @@
         account_name: holding.account_name || null
       }))
     };
+  }
+
+  function projectionMoney(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "n/a";
+    return `$${number.toFixed(2)}`;
+  }
+
+  function buildProjectionChart(projection) {
+    const horizonDefs = [
+      ["Now", null],
+      ["1d", projection.horizons?.one_day],
+      ["5d", projection.horizons?.five_day],
+      ["20d", projection.horizons?.twenty_day]
+    ];
+    const anchor = Number(projection.anchor_price);
+    if (!Number.isFinite(anchor)) return null;
+
+    const points = horizonDefs.map(([name, horizon], index) => {
+      if (index === 0) return { name, bear: anchor, base: anchor, bull: anchor, available: true };
+      if (!horizon || horizon.status !== "available") return { name, available: false };
+      return {
+        name,
+        bear: Number(horizon.bear_price),
+        base: Number(horizon.base_price),
+        bull: Number(horizon.bull_price),
+        available: [horizon.bear_price, horizon.base_price, horizon.bull_price].every((v) => Number.isFinite(Number(v)))
+      };
+    });
+    const usable = points.filter((p) => p.available);
+    if (usable.length < 2) return null;
+
+    const width = 320;
+    const height = 150;
+    const padLeft = 52;
+    const padRight = 34;
+    const padTop = 14;
+    const padBottom = 22;
+    const values = usable.flatMap((p) => [p.bear, p.base, p.bull]);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (max === min) { max += 1; min -= 1; }
+    const span = max - min;
+    min -= span * 0.08;
+    max += span * 0.08;
+    const xFor = (index) => padLeft + (index / (points.length - 1)) * (width - padLeft - padRight);
+    const yFor = (value) => padTop + (1 - (value - min) / (max - min)) * (height - padTop - padBottom);
+
+    const svgNs = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNs, "svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("class", "projection-chart");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label",
+      `Projection cone for ${projection.symbol}: anchor ${projectionMoney(anchor)}; ` +
+      usable.slice(1).map((p) => `${p.name} bear ${projectionMoney(p.bear)}, base ${projectionMoney(p.base)}, bull ${projectionMoney(p.bull)}`).join("; "));
+
+    const availableIdx = points.map((p, i) => (p.available ? i : null)).filter((i) => i !== null);
+    const coord = (i, v) => `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`;
+
+    const cone = document.createElementNS(svgNs, "polygon");
+    cone.setAttribute("points",
+      availableIdx.map((i) => coord(i, points[i].bull)).concat(
+        availableIdx.slice().reverse().map((i) => coord(i, points[i].bear))
+      ).join(" "));
+    cone.setAttribute("fill", "rgba(240,163,107,.18)");
+    cone.setAttribute("stroke", "none");
+    svg.appendChild(cone);
+
+    const drawPath = (key, color, dash) => {
+      const path = document.createElementNS(svgNs, "polyline");
+      path.setAttribute("points", availableIdx.map((i) => coord(i, points[i][key])).join(" "));
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", color);
+      path.setAttribute("stroke-width", "2");
+      if (dash) path.setAttribute("stroke-dasharray", dash);
+      svg.appendChild(path);
+    };
+    drawPath("bear", "rgba(190,70,80,.9)", "4 3");
+    drawPath("base", "rgba(255,255,255,.9)", null);
+    drawPath("bull", "rgba(70,160,90,.9)", "4 3");
+
+    points.forEach((p, i) => {
+      const tick = document.createElementNS(svgNs, "text");
+      tick.setAttribute("x", xFor(i).toFixed(1));
+      tick.setAttribute("y", String(height - 6));
+      tick.setAttribute("text-anchor", "middle");
+      tick.setAttribute("font-size", "9");
+      tick.setAttribute("fill", "currentColor");
+      tick.setAttribute("opacity", p.available ? "0.85" : "0.4");
+      tick.textContent = p.available ? p.name : `${p.name} n/a`;
+      svg.appendChild(tick);
+      if (p.available && i > 0) {
+        const dot = document.createElementNS(svgNs, "circle");
+        dot.setAttribute("cx", xFor(i).toFixed(1));
+        dot.setAttribute("cy", yFor(p.base).toFixed(1));
+        dot.setAttribute("r", "2.5");
+        dot.setAttribute("fill", "rgba(255,255,255,.95)");
+        svg.appendChild(dot);
+      }
+    });
+
+    const anchorLabel = document.createElementNS(svgNs, "text");
+    anchorLabel.setAttribute("x", "2");
+    anchorLabel.setAttribute("y", yFor(anchor).toFixed(1));
+    anchorLabel.setAttribute("font-size", "9");
+    anchorLabel.setAttribute("fill", "currentColor");
+    anchorLabel.setAttribute("dominant-baseline", "middle");
+    anchorLabel.textContent = projectionMoney(anchor);
+    svg.appendChild(anchorLabel);
+
+    const last = availableIdx[availableIdx.length - 1];
+    [["bull", "rgba(70,160,90,.95)"], ["base", "rgba(255,255,255,.95)"], ["bear", "rgba(190,70,80,.95)"]].forEach(([key, color]) => {
+      const text = document.createElementNS(svgNs, "text");
+      text.setAttribute("x", String(width - padRight + 3));
+      text.setAttribute("y", yFor(points[last][key]).toFixed(1));
+      text.setAttribute("font-size", "8.5");
+      text.setAttribute("fill", color);
+      text.setAttribute("dominant-baseline", "middle");
+      text.textContent = projectionMoney(points[last][key]);
+      svg.appendChild(text);
+    });
+
+    return svg;
+  }
+
+  function buildProjectionPanel(projection, result) {
+    const panel = document.createElement("div");
+    panel.className = "projection-panel";
+
+    const headline = document.createElement("div");
+    headline.className = "projection-headline";
+    const bias = String(projection.direction_bias || "neutral");
+    const badge = document.createElement("em");
+    badge.className = `projection-badge ${bias}`;
+    badge.textContent = bias.toUpperCase();
+    const confidence = document.createElement("span");
+    confidence.textContent = `Projection confidence ${Number(projection.projection_confidence_score) || 0}/100 (${String(projection.projection_confidence_label || "low")})`;
+    headline.append(badge, confidence);
+    panel.appendChild(headline);
+
+    if (projection.projection_status !== "available") {
+      const reason = document.createElement("div");
+      reason.textContent = `Projection unavailable: ${projection.unavailable_reason || "unknown reason"}`;
+      panel.appendChild(reason);
+      return panel;
+    }
+
+    const anchorSourceLabels = {
+      robinhood_quote_fallback: "live Robinhood quote",
+      massive_snapshot: "Massive snapshot",
+      latest_completed_close: "latest completed close (not a live price)"
+    };
+    const anchorLine = document.createElement("div");
+    anchorLine.textContent = `Anchor ${projectionMoney(projection.anchor_price)} — ${anchorSourceLabels[projection.anchor_price_source] || projection.anchor_price_source}${projection.quote_timestamp ? ` as of ${new Date(projection.quote_timestamp).toLocaleTimeString()}` : ""}`;
+    panel.appendChild(anchorLine);
+
+    const chart = buildProjectionChart(projection);
+    if (chart) panel.appendChild(chart);
+
+    const table = document.createElement("table");
+    table.className = "projection-table";
+    const head = document.createElement("tr");
+    ["Horizon", "Bear (20th)", "Base (median)", "Bull (80th)", "Analogue up-rate", "Analogues"].forEach((text) => {
+      const th = document.createElement("th");
+      th.textContent = text;
+      head.appendChild(th);
+    });
+    table.appendChild(head);
+    [["1 day", projection.horizons.one_day], ["5 days", projection.horizons.five_day], ["20 days", projection.horizons.twenty_day]].forEach(([name, horizon]) => {
+      const row = document.createElement("tr");
+      const cells = horizon && horizon.status === "available"
+        ? [name, projectionMoney(horizon.bear_price), projectionMoney(horizon.base_price), projectionMoney(horizon.bull_price), `${(Number(horizon.historical_up_rate) * 100).toFixed(0)}%`, String(horizon.analogue_count)]
+        : [name, "unavailable", "—", "—", "—", "—"];
+      cells.forEach((text) => {
+        const td = document.createElement("td");
+        td.textContent = text;
+        row.appendChild(td);
+      });
+      if (horizon && horizon.status !== "available" && horizon.unavailable_reason) row.title = horizon.unavailable_reason;
+      table.appendChild(row);
+    });
+    panel.appendChild(table);
+
+    const news = projection.news_analysis;
+    if (news) {
+      const newsLine = document.createElement("div");
+      const score = Number(news.aggregate_news_score) || 0;
+      newsLine.textContent = `News score ${score > 0 ? "+" : ""}${score.toFixed(2)} (coverage: ${news.coverage_quality})${news.trend_and_market_only ? " — no supplied sentiment, trend-and-market-only" : ""}${news.sentiment_agreement === "conflicting" ? " — sentiments conflict" : ""}`;
+      panel.appendChild(newsLine);
+    }
+
+    if (Array.isArray(projection.drivers) && projection.drivers.length) {
+      const drivers = document.createElement("ul");
+      drivers.className = "projection-list";
+      projection.drivers.slice(0, 3).forEach((text) => {
+        const li = document.createElement("li");
+        li.textContent = `Driver: ${text}`;
+        drivers.appendChild(li);
+      });
+      (Array.isArray(projection.risks) ? projection.risks.slice(0, 3) : []).forEach((text) => {
+        const li = document.createElement("li");
+        li.textContent = `Risk: ${text}`;
+        drivers.appendChild(li);
+      });
+      panel.appendChild(drivers);
+    }
+
+    const backtest = projection.backtest && projection.backtest.five_day;
+    const backtestLine = document.createElement("div");
+    backtestLine.className = "projection-note";
+    if (backtest && backtest.status === "available") {
+      backtestLine.textContent = `Walk-forward backtest (5-day): ${(Number(backtest.directional_accuracy) * 100).toFixed(0)}% directional accuracy, median abs error ${Number(backtest.median_absolute_error_percent).toFixed(2)}pp over ${backtest.samples} samples.`;
+    } else {
+      backtestLine.textContent = "Walk-forward backtest: insufficient history for reliable accuracy metrics.";
+    }
+    panel.appendChild(backtestLine);
+
+    const disclaimer = document.createElement("div");
+    disclaimer.className = "projection-note";
+    disclaimer.textContent = `Historical data through ${result.historical_data_through || "unavailable"}. Scenario bands are the 20th/50th/80th percentiles of historical analogue outcomes plus a capped news adjustment — scenario estimates, not guaranteed targets. The analogue up-rate is the share of similar past setups that finished higher, not a probability of profit.`;
+    panel.appendChild(disclaimer);
+
+    return panel;
+  }
+
+  function renderProjectionResult(result, grid) {
+    lastProjection = result;
+    const candidates = Array.isArray(result.candidates) ? result.candidates : [];
+    candidates.forEach((projection) => {
+      const card = grid.querySelector(`[data-projection-symbol="${String(projection.symbol).toUpperCase()}"]`);
+      if (!card) return;
+      card.querySelectorAll(".projection-panel").forEach((existing) => existing.remove());
+      card.appendChild(buildProjectionPanel(projection, result));
+    });
+    const regime = result.market_regime || {};
+    appendAssistantMessage(
+      "Trend-News Projection",
+      `Projected ${candidates.length} candidates (${result.cached ? "cached result" : "fresh calculation"}). Market regime: ${String(regime.regime || "unavailable").replace(/_/g, "-")} (SPY 20-session ${regime.spy_twenty_session_return_percent !== null && regime.spy_twenty_session_return_percent !== undefined ? `${regime.spy_twenty_session_return_percent}%` : "n/a"}). Projections are historical-analogue scenario bands, not price predictions.`
+    );
+  }
+
+  async function runProjection(button, grid) {
+    if (projectionBusy || button.disabled) return;
+    if (!isSignedIn()) {
+      appendAssistantMessage("Assistant", "Sign in before requesting projections.");
+      return;
+    }
+    projectionBusy = true;
+    button.disabled = true;
+    button.textContent = "Projecting...";
+    const pending = appendAssistantMessage("Trend-News Projection", "Building historical-analogue scenario bands for the top five candidates (daily history, SPY/QQQ/IWM regime, news, and walk-forward backtest)...");
+    try {
+      const result = await apiFetchJson("/api/market-projection", {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      pending?.remove();
+      if (!result?.data || !Array.isArray(result.data.candidates)) {
+        throw new Error("The API returned an invalid projection response");
+      }
+      renderProjectionResult(result.data, grid);
+    } catch (error) {
+      pending?.remove();
+      appendAssistantMessage("Trend-News Projection", `Projection unavailable: ${error.message}`);
+    } finally {
+      projectionBusy = false;
+      button.disabled = false;
+      button.textContent = "Project Top 5";
+    }
   }
 
   async function analyzeTopCandidates(button) {

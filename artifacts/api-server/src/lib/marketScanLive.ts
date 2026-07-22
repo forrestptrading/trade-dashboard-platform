@@ -144,7 +144,7 @@ export interface CapabilityFailure {
   plan_restricted: boolean;
 }
 
-class MassiveRequestError extends Error {
+export class MassiveRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -154,7 +154,7 @@ class MassiveRequestError extends Error {
   }
 }
 
-async function massiveGet(path: string, params: Record<string, string>, apiKey: string): Promise<JsonObject> {
+export async function massiveGet(path: string, params: Record<string, string>, apiKey: string): Promise<JsonObject> {
   const url = path.startsWith("https://")
     ? new URL(path)
     : new URL(path, MASSIVE_BASE_URL);
