@@ -1163,6 +1163,6 @@
 
   loadScript("dashboardRuntimeFixesLoader", "dashboard-runtime-fixes.js?v=1.0");
   loadScript("dashboardPolishLoader", "ui-polish.js?v=3.0");
-  loadScript("assistantCoreLoader", "ai-assistant-core.js?v=1.2");
+  loadScript("assistantCoreLoader", "ai-assistant-core.js?v=1.3");
   installMarketScanner();
 })();

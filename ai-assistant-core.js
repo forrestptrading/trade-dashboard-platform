@@ -46,11 +46,13 @@
         overflow-wrap: anywhere;
       }
       .assistant-message-user {
-        background: #f5ead6;
+        background: var(--surface-strong);
+        color: var(--text);
         margin-left: min(12%, 80px);
       }
       .assistant-message-bot {
-        background: #fff;
+        background: var(--card);
+        color: var(--text);
         margin-right: min(8%, 60px);
       }
       .assistant-message-label {
@@ -74,8 +76,15 @@
         border-radius: 12px;
         padding: 12px;
         font: inherit;
-        background: #fff;
+        background: var(--input-bg);
         color: var(--text);
+        -webkit-text-fill-color: var(--text);
+        caret-color: var(--text);
+      }
+      .assistant-form textarea::placeholder {
+        color: var(--muted);
+        -webkit-text-fill-color: var(--muted);
+        opacity: 1;
       }
       .assistant-actions,
       .assistant-quick-actions {
@@ -97,21 +106,32 @@
       }
       .assistant-actions button[type="button"],
       .assistant-quick-actions button {
-        background: #eee4d6;
+        background: var(--surface);
         color: var(--text);
+        -webkit-text-fill-color: var(--text);
+        border: 1px solid var(--border-strong);
+      }
+      .assistant-actions button[type="button"]:not(:disabled):hover,
+      .assistant-quick-actions button:not(:disabled):hover {
+        background: var(--surface-hover);
+        color: #fff;
+        -webkit-text-fill-color: #fff;
       }
       .assistant-actions button:disabled,
       .assistant-quick-actions button:disabled,
       .assistant-form textarea:disabled {
         cursor: not-allowed;
-        opacity: .55;
+        opacity: .7;
+        color: var(--text-secondary);
+        -webkit-text-fill-color: var(--text-secondary);
       }
       .assistant-context-list {
         display: grid;
         gap: 10px;
       }
       .assistant-context-item {
-        background: #fff;
+        background: var(--surface);
+        color: var(--text);
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 12px;
