@@ -826,6 +826,46 @@ input:-webkit-autofill:focus {
   gap: 18px !important;
 }
 
+/* Late-injected core styles set light backgrounds on these controls —
+   force the dark control system to win. */
+.assistant-form textarea {
+  background: var(--input-bg) !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-control) !important;
+}
+
+.assistant-actions button[type="submit"] {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: var(--radius-control) !important;
+}
+
+.assistant-actions button[type="submit"]:not(:disabled):hover {
+  background: var(--accent-hover) !important;
+}
+
+.assistant-actions button[type="button"],
+.assistant-quick-actions button {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-control) !important;
+}
+
+.assistant-actions button[type="button"]:not(:disabled):hover,
+.assistant-quick-actions button:not(:disabled):hover {
+  background: var(--surface-hover) !important;
+}
+
+.assistant-actions button:disabled,
+.assistant-quick-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .assistant-chat {
   min-height: 480px !important;
 }
