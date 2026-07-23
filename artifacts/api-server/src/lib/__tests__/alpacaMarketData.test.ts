@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AlpacaMarketDataError,
   getAlpacaConfigCheck,
+  getLatestAlpacaLiveQuotes,
   getLatestAlpacaStockBar,
 } from "../alpacaMarketData";
 
@@ -88,6 +89,56 @@ describe("Alpaca Market Data client", () => {
       "APCA-API-KEY-ID": KEY_ID,
       "APCA-API-SECRET-KEY": SECRET,
     });
+  });
+
+  it("normalizes batch latest trades and quotes for live watchlist verification", async () => {
+    configureCredentials();
+    mockFetch
+      .mockResolvedValueOnce(response(200, {
+        trades: {
+          AAPL: { p: 210.12, t: "2026-07-23T18:30:01Z" },
+          TSLA: { p: 322.45, t: "2026-07-23T18:30:02Z" },
+        },
+      }))
+      .mockResolvedValueOnce(response(200, {
+        quotes: {
+          AAPL: { bp: 210.1, ap: 210.14, t: "2026-07-23T18:30:03Z" },
+          TSLA: { bp: 322.4, ap: 322.5, t: "2026-07-23T18:30:03Z" },
+        },
+      }));
+
+    await expect(getLatestAlpacaLiveQuotes("aapl,TSLA,aapl")).resolves.toEqual([
+      {
+        symbol: "AAPL",
+        price: 210.12,
+        bidPrice: 210.1,
+        askPrice: 210.14,
+        tradeTimestamp: "2026-07-23T18:30:01Z",
+        quoteTimestamp: "2026-07-23T18:30:03Z",
+        timestamp: "2026-07-23T18:30:03Z",
+        feed: "iex",
+        source: "alpaca",
+      },
+      {
+        symbol: "TSLA",
+        price: 322.45,
+        bidPrice: 322.4,
+        askPrice: 322.5,
+        tradeTimestamp: "2026-07-23T18:30:02Z",
+        quoteTimestamp: "2026-07-23T18:30:03Z",
+        timestamp: "2026-07-23T18:30:03Z",
+        feed: "iex",
+        source: "alpaca",
+      },
+    ]);
+    expect(String(mockFetch.mock.calls[0]?.[0])).toContain("/v2/stocks/trades/latest?symbols=AAPL%2CTSLA&feed=iex");
+    expect(String(mockFetch.mock.calls[1]?.[0])).toContain("/v2/stocks/quotes/latest?symbols=AAPL%2CTSLA&feed=iex");
+  });
+
+  it("rejects invalid symbols in the batch before making upstream requests", async () => {
+    configureCredentials();
+    await expect(getLatestAlpacaLiveQuotes("AAPL,BAD SYMBOL")).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("maps invalid credentials/upstream 401 to a safe error", async () => {

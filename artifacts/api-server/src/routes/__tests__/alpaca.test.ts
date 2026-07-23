@@ -6,6 +6,7 @@ vi.mock("../../middlewares/auth.js", () => ({
 }));
 
 const mockGetLatestAlpacaStockBar = vi.fn();
+const mockGetLatestAlpacaLiveQuotes = vi.fn();
 const mockGetAlpacaConfigCheck = vi.fn();
 
 vi.mock("../../lib/alpacaMarketData.js", async (importOriginal) => {
@@ -14,6 +15,7 @@ vi.mock("../../lib/alpacaMarketData.js", async (importOriginal) => {
     ...actual,
     getAlpacaConfigCheck: mockGetAlpacaConfigCheck,
     getLatestAlpacaStockBar: mockGetLatestAlpacaStockBar,
+    getLatestAlpacaLiveQuotes: mockGetLatestAlpacaLiveQuotes,
   };
 });
 
@@ -31,6 +33,7 @@ async function createServer() {
 beforeEach(() => {
   vi.resetModules();
   mockGetLatestAlpacaStockBar.mockReset();
+  mockGetLatestAlpacaLiveQuotes.mockReset();
   mockGetAlpacaConfigCheck.mockReset();
 });
 
@@ -71,6 +74,37 @@ describe("Alpaca routes", () => {
       const res = await fetch(`${baseUrl}/api/alpaca/test?symbol=AAPL`);
       await expect(res.json()).resolves.toMatchObject({ success: true, data: { symbol: "AAPL", source: "alpaca" } });
       expect(mockGetLatestAlpacaStockBar).toHaveBeenCalledWith("AAPL");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("returns batch live Alpaca data for the watchlist", async () => {
+    mockGetLatestAlpacaLiveQuotes.mockResolvedValue([
+      {
+        symbol: "AAPL",
+        price: 210.12,
+        bidPrice: 210.1,
+        askPrice: 210.14,
+        tradeTimestamp: "2026-07-23T18:30:01Z",
+        quoteTimestamp: "2026-07-23T18:30:03Z",
+        timestamp: "2026-07-23T18:30:03Z",
+        feed: "iex",
+        source: "alpaca",
+      },
+    ]);
+    mockGetAlpacaConfigCheck.mockReturnValue({ success: true, keyIdConfigured: true, secretKeyConfigured: true, feed: "iex" });
+    const { server, baseUrl } = await createServer();
+    try {
+      const res = await fetch(`${baseUrl}/api/alpaca/live?symbols=AAPL,TSLA`);
+      expect(res.headers.get("cache-control")).toContain("no-store");
+      await expect(res.json()).resolves.toMatchObject({
+        success: true,
+        source: "alpaca",
+        feed: "iex",
+        data: [{ symbol: "AAPL", source: "alpaca" }],
+      });
+      expect(mockGetLatestAlpacaLiveQuotes).toHaveBeenCalledWith("AAPL,TSLA");
     } finally {
       server.close();
     }
