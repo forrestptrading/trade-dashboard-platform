@@ -177,6 +177,36 @@
     }, delay);
   }
 
+  let refreshButtonBusy = false;
+
+  async function runVisibleRefresh(button) {
+    if (refreshButtonBusy) return;
+    refreshButtonBusy = true;
+    const originalText = button.textContent || "Refresh Data";
+    button.disabled = true;
+    button.textContent = "Refreshing...";
+    button.setAttribute("aria-busy", "true");
+    button.title = "Refreshing API health, quotes, private portfolio data, and Alpaca status";
+
+    try {
+      await refreshAllData();
+      button.textContent = "Refreshed";
+      button.title = `Last refreshed ${easternTimestamp(new Date().toISOString())}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Refresh failed";
+      button.textContent = "Refresh Failed";
+      button.title = message;
+      console.warn("Dashboard refresh failed:", error);
+    } finally {
+      window.setTimeout(() => {
+        button.disabled = false;
+        button.textContent = originalText;
+        button.removeAttribute("aria-busy");
+        refreshButtonBusy = false;
+      }, 1200);
+    }
+  }
+
   if (!globalThis.__forrestAlpacaSidebarStatusReady) {
     globalThis.__forrestAlpacaSidebarStatusReady = true;
     installAlpacaFooterRows();
@@ -194,6 +224,20 @@
       refreshAllData = async function refreshAllDataWithAlpacaStatus() {
         await baseRefreshAllData();
         await checkAlpacaSidebarStatus();
+      };
+    }
+
+    if (typeof setupFormsAndButtons === "function") {
+      const baseSetupFormsAndButtons = setupFormsAndButtons;
+      setupFormsAndButtons = function setupFormsAndButtonsWithWorkingRefresh() {
+        baseSetupFormsAndButtons();
+        const existingButton = document.getElementById("refreshDataBtn");
+        if (!existingButton || existingButton.dataset.workingRefresh === "true") return;
+
+        const replacementButton = existingButton.cloneNode(true);
+        replacementButton.dataset.workingRefresh = "true";
+        existingButton.replaceWith(replacementButton);
+        replacementButton.addEventListener("click", () => runVisibleRefresh(replacementButton));
       };
     }
 
